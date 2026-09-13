@@ -38,6 +38,10 @@ set_target_properties(ansel-test-masks-geometry PROPERTIES
 target_compile_definitions(ansel-test-masks-geometry PRIVATE
   ANSEL_TEST_SOURCE_DIR="${CMAKE_SOURCE_DIR}"
   ANSEL_TEST_BINARY_DIR="${CMAKE_BINARY_DIR}")
+# -municode selects the wide CRT startup, which calls wmain(); see unittests/win_main.c.
+if(WIN32)
+  target_sources(ansel-test-masks-geometry PRIVATE unittests/win_main.c)
+endif(WIN32)
 add_test(NAME masks_geometry
          COMMAND ansel-test-masks-geometry ${CMAKE_BINARY_DIR}/masks-geometry)
 

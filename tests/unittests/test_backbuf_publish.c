@@ -167,8 +167,10 @@ static void test_single_field_setter_is_a_publication(void **state)
   assert_int_equal(published.height, SHAPE_A_H);
 }
 
-int main(void)
+int main(int argc, char **argv)
 {
+  (void)argc;
+  (void)argv;
   const struct CMUnitTest tests[] = {
     cmocka_unit_test(test_field_by_field_read_crosses_publications),
     cmocka_unit_test(test_snapshot_never_crosses_publications),

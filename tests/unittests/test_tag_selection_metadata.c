@@ -151,8 +151,10 @@ static void test_metadata_foreach_selected(void **state)
   dt_selection_repository_clear();
 }
 
-int main(void)
+int main(int argc, char **argv)
 {
+  (void)argc;
+  (void)argv;
   const struct CMUnitTest tests[] = {
     cmocka_unit_test(test_selection_lowest_id),
     cmocka_unit_test(test_tag_agreement),

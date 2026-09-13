@@ -1,3 +1,11 @@
+# Windows links every executable with -municode, which selects the wide CRT startup: a test
+# whose entry point is a plain main() does not link. win_main.c carries the wrapper that
+# forwards to it -- only for the tests that do not already include it themselves.
+set(_win_entry "")
+if(WIN32)
+  set(_win_entry win_main.c)
+endif()
+
 # Apple's ld64 does not support -Wl,--wrap, which add_cmocka_mock_test() is built on --
 # the mock tests cannot link on macOS, with any cmocka.
 if(NOT APPLE)
@@ -9,9 +17,12 @@ add_cmocka_test(test_sample
                 COMPILE_OPTIONS -Wno-error=deprecated-declarations # cmocka >= 2 deprecates check_expected et al.
                 LINK_LIBRARIES ${CMOCKA_LINK_TARGET})
 
-# Windows: main-method requires the wrapper provided by lib-darktable
+# Windows: main-method requires the wrapper provided by lib-darktable. This one includes
+# win/main_wrapper.h itself, so it needs the src/ include dir rather than ${_win_entry} --
+# compiling both in would define wmain() twice.
 if(WIN32)
     target_link_libraries(test_sample PRIVATE lib_ansel)
+    target_include_directories(test_sample PRIVATE ${CMAKE_SOURCE_DIR}/src)
     _copy_required_library(test_sample lib_ansel)
 endif(WIN32)
 
@@ -42,11 +53,12 @@ set(LIB_ANSEL_UNIT_TESTS
   test_history_snapshot
   test_masks_raster_contract
   test_stroke_raster
+  test_paint_module_switch
 )
 
 foreach(test ${LIB_ANSEL_UNIT_TESTS})
   add_cmocka_test(${test}
-                  SOURCES ${test}.c
+                  SOURCES ${test}.c ${_win_entry}
                   COMPILE_OPTIONS -Wno-error=deprecated-declarations # cmocka >= 2 deprecates check_expected et al.
                   LINK_LIBRARIES ${CMOCKA_LINK_TARGET} lib_ansel)
   target_include_directories(${test} PRIVATE

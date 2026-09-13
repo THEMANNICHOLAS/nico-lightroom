@@ -748,9 +748,10 @@ endif()
 # because several CI Debug runners are not provisioned for it. An EXPLICIT
 # -DBUILD_TESTING=ON stays a hard requirement.
 #
-# Linux only. Windows links every executable with -municode, so each test binary needs the
-# wWinMain wrapper wired up first; Apple's ld64 has no --wrap, so the cmocka mock tests can
-# never link there. Both platforms opt in explicitly once someone does that work.
+# Linux only. Windows links every executable with -municode; the unit tests wire the wmain
+# wrapper via tests/unittests/win_main.c and are built by an explicit -DBUILD_TESTING=ON.
+# Apple's ld64 has no --wrap, so the cmocka mock tests can never link there. Both platforms
+# opt in explicitly.
 set(_build_testing_defaulted FALSE)
 if(CMAKE_BUILD_TYPE STREQUAL "Debug" AND "${BUILD_TESTING}" STREQUAL "" AND NOT WIN32 AND NOT APPLE)
   set(BUILD_TESTING ON)

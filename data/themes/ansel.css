@@ -115,7 +115,7 @@
 /* General Base Colors */
 @define-color selected_bg_color @slate_36;
 @define-color border_color @grey_40;
-@define-color bg_color @slate_20;
+@define-color bg_color #222426;
 @define-color fg_color @grey_100;
 @define-color base_color @fg_color;
 @define-color text_color @grey_35;
@@ -740,15 +740,31 @@ dialog .sidebar row:selected:hover label,
    the wrapper's layout, not on the button's own CSS margin -- the button's custom
    draw() reinterprets its own margin a second time as a paint-only offset, which
    would paint its icon outside its real GTK allocation (the box hover/click hit-test
-   against) if the button carried this margin itself. */
+   against) if the button carried this margin itself.
+
+   The button is now large enough to stand on its own, so the -6px tuck is gone and
+   only a right-hand gap remains. If a label ever needs pulling back, the negative
+   left margin goes here -- on the BOX, never on the button. */
 #module-header .dt_iop_enable_button_box {
-  margin: 0 3px 0 -6px;
+  margin: 0 0.25em 0 0;
 }
 
+/* A transparent 26px circle. GTK hit-tests clicks against this allocation, not
+   against the ink: the dot stays a small mark while the target stops being a bar.
+
+   padding and border MUST stay at 0. togglebutton.c subtracts both from the
+   allocation before handing w/h to the paint function, and PREAMBLE() then scales
+   the unit square by min(w, h) -- so any padding here silently shrinks the dot and
+   desynchronises it from the radius in paint.c. */
 #module-header .dt_module_btn.dt_iop_enable_button {
-  color: @grey_65;
+  min-width: 1.625em;    /* 26px at the 16px reference font */
+  min-height: 1.625em;
+  padding: 0;
+  margin: 0;
+  border: none;
+  border-radius: 50%;
   background: transparent;
-  border-color: transparent;
+  color: @slate_44;      /* off */
 }
 
 #module-header .dt_module_btn.dt-collapse-arrow {
@@ -758,16 +774,38 @@ dialog .sidebar row:selected:hover label,
   margin: 0 0 0 -6px;
 }
 
-#module-header .dt_iop_enable_button:checked {
-  color: @orange_dark;
-}
-
+/* Hover is the only feedback the dot needs once the target is 26px, so the
+   prelight-widen branch in paint.c goes away and this takes over. */
 #module-header .dt_iop_enable_button:hover,
 #module-header .dt_iop_enable_button:active,
 #module-header .dt_iop_enable_button:selected {
+  color: @grey_55;
+}
+
+/* @orange_light rather than @orange_dark: at this size the dot has a fraction of
+   the area the old bar had, and @orange_dark does not hold up against @slate_16.
+   This is the one line to change for a quieter orange. */
+#module-header .dt_iop_enable_button:checked {
   color: @orange_light;
 }
 
+#module-header .dt_iop_enable_button:checked:hover {
+  color: shade(@orange_light, 1.12);
+}
+
+/* The generic .dt_iop_enable_button:disabled rule further down cannot beat the
+   #module-header base colour above, so the forced-off / insensitive padlock is
+   restated here at the same specificity. It must stay ABOVE the forced-on rule:
+   a forced-on button is insensitive too, and the later rule of equal specificity
+   wins, so forced-on keeps its accent only by coming last. */
+#module-header .dt_iop_enable_button:disabled,
+#module-header .dt_iop_enable_button.dt_iop_enable_forced_off {
+  color: @disabled_fg_color;
+}
+
+/* Forced-on modules keep the accent; forced-off keeps the 0.5 opacity rule that
+   already lives in section 2. Both are drawn as a padlock by
+   dtgtk_cairo_paint_module_switch_on(). */
 #module-header .dt_iop_enable_button.dt_iop_enable_forced_on,
 #picker-grey {
   color: @orange_light;
@@ -1063,16 +1101,13 @@ notebook.empty stack {
   margin-top: 0;
 }
 
-#modules-tabs notebook tab,
+/* The two notebooks used to share every rule below; the equaliser's ring tabs
+   keep the folder look unchanged. */
+
 #colorequal-ring-tabs>header>tabs>tab {
   padding: 0;
   border: 1px solid alpha(@grey_95, 0.10);
   background-color: @recessed_color_bg;
-}
-
-#modules-tabs notebook tab {
-  margin: 0.35em 0.2em 0;
-  border-radius: 0.55em 0.55em 0 0;
 }
 
 #colorequal-ring-tabs>header>tabs>tab {
@@ -1082,38 +1117,27 @@ notebook.empty stack {
   border-radius: 0.48em 0.48em 0 0;
 }
 
-#modules-tabs notebook tabs arrow,
 #colorequal-ring-tabs>header>tabs arrow {
   border: none;
   color: @grey_70;
 }
 
-#modules-tabs notebook tabs arrow {
-  font-size: 1.4em;
-  padding: calc(0.625em - 7px);
-}
-
-#modules-tabs notebook header,
 #colorequal-ring-tabs>header {
   background-color: @bg_color;
   border: none;
 }
 
-#modules-tabs notebook header tabs,
 #colorequal-ring-tabs>header>tabs {
   background-color: transparent;
   border: none;
   border-bottom: 1px solid alpha(@grey_95, 0.36);
 }
 
-#modules-tabs notebook,
 #colorequal-ring-tabs {
   margin-bottom: 0;
   border: none;
 }
 
-#modules-tabs notebook tab label,
-#modules-tabs notebook tab label.dt_modulegroups_tab_label,
 #colorequal-ring-tabs>header>tabs>tab label,
 #colorequal-ring-tabs>header>tabs>tab label.dt_modulegroups_tab_label {
   color: @grey_75;
@@ -1123,31 +1147,22 @@ notebook.empty stack {
   border: none;
 }
 
-#modules-tabs notebook tab label {
-  font-size: 1.05em;
-  padding: 0.55em;
-}
-
 #colorequal-ring-tabs>header>tabs>tab label,
 #colorequal-ring-tabs>header>tabs>tab label.dt_modulegroups_tab_label {
   padding: 0.16em 0.36em 0.14em;
 }
 
-#modules-tabs notebook tab:hover,
 #colorequal-ring-tabs>header>tabs>tab:hover {
   border-color: alpha(@grey_95, 0.20);
   background-color: @grey_38;
 }
 
-#modules-tabs notebook tab:hover label,
-#modules-tabs notebook tab:hover label.dt_modulegroups_tab_label,
 #colorequal-ring-tabs>header>tabs>tab:hover label,
 #colorequal-ring-tabs>header>tabs>tab:hover label.dt_modulegroups_tab_label {
   color: @grey_90;
   border: none;
 }
 
-#modules-tabs notebook tab:checked,
 #colorequal-ring-tabs>header>tabs>tab:checked {
   border-top: 1px solid alpha(@grey_95, 0.36);
   border-left: 1px solid alpha(@grey_95, 0.36);
@@ -1157,8 +1172,6 @@ notebook.empty stack {
   margin-bottom: -1px;
 }
 
-#modules-tabs notebook tab:checked label,
-#modules-tabs notebook tab:checked label.dt_modulegroups_tab_label,
 #colorequal-ring-tabs>header>tabs>tab:checked label,
 #colorequal-ring-tabs>header>tabs>tab:checked label.dt_modulegroups_tab_label {
   color: @grey_100;
@@ -1166,18 +1179,110 @@ notebook.empty stack {
   border: none;
 }
 
-#modules-tabs notebook:disabled tab,
 #colorequal-ring-tabs:disabled>header>tabs>tab {
   border-color: alpha(@grey_95, 0.08);
   background-color: @recessed_color_bg;
 }
 
-#modules-tabs notebook:disabled tab label,
-#modules-tabs notebook:disabled tab label.dt_modulegroups_tab_label,
 #colorequal-ring-tabs:disabled>header>tabs>tab label,
 #colorequal-ring-tabs:disabled>header>tabs>tab label.dt_modulegroups_tab_label {
   color: @grey_65;
   border: none;
+}
+
+/* ---- the module group tabs: the new look ---- */
+
+#modules-tabs notebook,
+#modules-tabs notebook header {
+  background-color: @bg_color;
+  border: none;
+  margin-bottom: 0;
+}
+
+#modules-tabs notebook header {
+  padding: 0.75em 0.25em 0;
+}
+
+/* No container rule at all. The old `border-bottom` under `tabs` was what made
+   the active tab need three borders and a -1px overlap to punch through it. */
+#modules-tabs notebook header tabs {
+  background-color: transparent;
+  border: none;
+}
+
+/* The rail is an inset box-shadow on the tab node, so it cannot shift the
+   tab's geometry between states the way the old border set did. */
+#modules-tabs notebook tab {
+  border: none;
+  background-color: transparent;
+  padding: 0;
+  margin-bottom: 0;                       /* the -1px trick is gone */
+  box-shadow: inset 0 -2px 0 transparent;
+}
+
+#modules-tabs notebook tab:hover {
+  background-color: transparent;
+  box-shadow: inset 0 -2px 0 @slate_36;
+}
+
+#modules-tabs notebook tab:checked {
+  border: none;
+  background-color: transparent;
+  box-shadow: inset 0 -2px 0 @orange_light;
+}
+
+/* The bottom padding below is the room the rail sits under. */
+#modules-tabs notebook tab label,
+#modules-tabs notebook tab label.dt_modulegroups_tab_label {
+  color: @grey_60;
+  font-size: 1.05em;
+  font-weight: 500;
+  padding: 0.125em 0.75em 0.625em;
+  background-color: transparent;
+  border: none;
+  opacity: 1;
+}
+
+#modules-tabs notebook tab:hover label,
+#modules-tabs notebook tab:hover label.dt_modulegroups_tab_label {
+  color: @grey_75;
+  border: none;
+}
+
+#modules-tabs notebook tab:checked label,
+#modules-tabs notebook tab:checked label.dt_modulegroups_tab_label {
+  color: @grey_100;
+  font-weight: 700;
+  border: none;
+}
+
+#modules-tabs notebook:disabled tab label,
+#modules-tabs notebook:disabled tab label.dt_modulegroups_tab_label {
+  color: @grey_65;
+  border: none;
+}
+
+#modules-tabs notebook:disabled tab {
+  background-color: transparent;
+  box-shadow: none;
+}
+
+/* These are GtkNotebook's nodes, not widgets you packed, so they can only be
+   restyled -- never removed while gtk_notebook_set_scrollable(TRUE) is on. */
+#modules-tabs notebook tabs arrow {
+  font-size: 1.05em;
+  color: @grey_55;
+  min-width: 1.25em;
+  padding: 0 0.25em 0.5em;
+}
+
+#modules-tabs notebook tabs arrow:hover {
+  color: @grey_95;
+}
+
+#modules-tabs notebook tabs arrow:disabled {
+  color: @grey_55;
+  opacity: 0.25;
 }
 
 
