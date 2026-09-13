@@ -124,8 +124,10 @@ static void _locked_switch_paints_a_padlock_inside_the_box(void **state)
   cairo_surface_destroy(s);
 }
 
-int main(void)
+int main(int argc, char **argv)
 {
+  (void)argc;
+  (void)argv;
   const struct CMUnitTest tests[] = {
     cmocka_unit_test(_active_switch_paints_a_filled_disc),
     cmocka_unit_test(_inactive_switch_paints_a_hollow_ring),

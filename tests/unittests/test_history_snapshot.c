@@ -253,8 +253,10 @@ static void _cow_touch_ignores_a_marker_naming_a_different_item(void **state)
   dt_dev_history_snapshot_release(&snap);
 }
 
-int main(void)
+int main(int argc, char **argv)
 {
+  (void)argc;
+  (void)argv;
   const struct CMUnitTest tests[] = {
     cmocka_unit_test_setup_teardown(_a_snapshot_references_every_item_and_releases_them, _setup, _teardown),
     cmocka_unit_test_setup_teardown(_history_end_is_clamped_to_the_list_at_snapshot_time, _setup, _teardown),

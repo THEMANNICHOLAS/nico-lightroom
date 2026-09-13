@@ -575,8 +575,10 @@ static void _find_holder_names_the_group_that_references_a_shape(void **state)
   _write_fixture_cleanup(&f);
 }
 
-int main(void)
+int main(int argc, char **argv)
 {
+  (void)argc;
+  (void)argv;
   const struct CMUnitTest tests[] = {
     cmocka_unit_test(_from_status_maps_zero_to_ok_and_everything_else_to_error),
     cmocka_unit_test(_a_shape_with_no_geometry_rasterises_empty),

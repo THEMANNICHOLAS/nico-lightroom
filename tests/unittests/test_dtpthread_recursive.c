@@ -128,8 +128,10 @@ static void _an_rwlock_writer_may_re_enter(void **state) NO_THREAD_SAFETY_ANALYS
   assert_int_equal(dt_pthread_rwlock_destroy(&lock), 0);
 }
 
-int main(void)
+int main(int argc, char **argv)
 {
+  (void)argc;
+  (void)argv;
   const struct CMUnitTest tests[] = {
     cmocka_unit_test(_a_null_attr_mutex_is_recursive),
     cmocka_unit_test(_the_blocking_lock_also_re_enters),

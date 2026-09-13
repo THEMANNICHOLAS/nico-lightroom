@@ -134,14 +134,16 @@ static void _saving_marks_defaults_as_comments_and_changes_as_lines(void **state
   g_free(path);
 }
 
-int main(void)
+int main(int argc, char **argv)
 {
+  (void)argc;
+  (void)argv;
   // The accel map is a plain hash table populated by gtk_init(), and unreachable without it.
   // The result is deliberately ignored: a headless runner opens no display and answers FALSE,
   // having initialised everything these tests touch anyway.
-  int argc = 0;
-  char **argv = NULL;
-  gtk_init_check(&argc, &argv);
+  int gtk_argc = 0;
+  char **gtk_argv = NULL;
+  gtk_init_check(&gtk_argc, &gtk_argv);
 
   const struct CMUnitTest tests[] = {
     cmocka_unit_test(_an_absent_path_takes_the_app_default),

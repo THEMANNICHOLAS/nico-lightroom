@@ -159,8 +159,10 @@ static void _typed_setters_retire_too(void **state)
   assert_int_equal(dt_conf_get_int_fast(TEST_KEY), 22);
 }
 
-int main(void)
+int main(int argc, char **argv)
 {
+  (void)argc;
+  (void)argv;
   const struct CMUnitTest tests[] = {
     cmocka_unit_test(_borrowed_value_survives_being_replaced),
     cmocka_unit_test(_every_displaced_value_stays_readable),
