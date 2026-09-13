@@ -967,11 +967,7 @@ void dt_iop_gui_update_header(dt_iop_module_t *module)
 void dt_iop_gui_set_enable_button_icon(GtkWidget *w, dt_iop_module_t *module)
 {
   // set on/off icon
-  if(module->default_enabled && module->hide_enable_button)
-  {
-    dtgtk_togglebutton_set_paint(DTGTK_TOGGLEBUTTON(w), dtgtk_cairo_paint_module_switch_on, 0, module);
-  }
-  else if(!module->default_enabled && module->hide_enable_button)
+  if(module->hide_enable_button)
   {
     dtgtk_togglebutton_set_paint(DTGTK_TOGGLEBUTTON(w), dtgtk_cairo_paint_module_switch_on, 0, module);
   }

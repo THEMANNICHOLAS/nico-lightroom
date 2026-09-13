@@ -431,12 +431,14 @@ void dtgtk_cairo_paint_module_switch(cairo_t *cr, gint x, gint y, gint w, gint h
 
   if(flags & CPF_ACTIVE)
   {
+    cairo_new_sub_path(cr);
     cairo_arc(cr, 0.5, 0.5, 0.21, 0.0, 2.0 * M_PI);
     cairo_fill(cr);
   }
   else
   {
     cairo_set_line_width(cr, 0.058);
+    cairo_new_sub_path(cr);
     cairo_arc(cr, 0.5, 0.5, 0.182, 0.0, 2.0 * M_PI);
     cairo_stroke(cr);
   }
