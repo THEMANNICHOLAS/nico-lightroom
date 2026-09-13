@@ -650,6 +650,27 @@ void dtgtk_cairo_paint_invert(cairo_t *cr, gint x, gint y, gint w, gint h, gint 
   FINISH
 }
 
+void dtgtk_cairo_paint_before_after(cairo_t *cr, gint x, gint y, gint w, gint h, gint flags, void *data)
+{
+  PREAMBLE(1, 1, 0, 0)
+
+  // Before/after comparison glyph: a rounded frame split down the middle, left half filled. The
+  // fill is clipped to the frame's own rounded path so it follows the corners. Drawn in unit space
+  // (PREAMBLE scales the context), nothing here reads the prelight/active flags -- state feedback
+  // belongs to the widget's CSS.
+  cairo_save(cr);
+  _rounded_rectangle(cr);
+  cairo_clip(cr);
+  cairo_rectangle(cr, 0.0, 0.0, 0.5, 1.0);
+  cairo_fill(cr);
+  cairo_restore(cr);
+
+  _rounded_rectangle(cr);
+  cairo_stroke(cr);
+
+  FINISH
+}
+
 void dtgtk_cairo_paint_masks_edit(cairo_t *cr, gint x, gint y, gint w, gint h, gint flags, void *data)
 {
   PREAMBLE(1, 1, 0, 0)

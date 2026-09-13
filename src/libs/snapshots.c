@@ -52,6 +52,7 @@
 
 #include "gui/color_picker_proxy.h"
 #include "widgets/draw.h"
+#include "widgets/togglebutton.h"
 #include "libs/lib.h"
 #include "libs/lib_api.h"
 #include "views/view.h"
@@ -102,12 +103,20 @@ typedef struct dt_lib_snapshots_t
   gboolean hover_line; // cursor is within DT_GUI_MOUSE_EFFECT_RADIUS of the split line itself
 
   GtkWidget *take_button;
+
+  /* hidden "before" render (all non-geometry edits off) and its toolbox toggle. The button's
+   * `active` flag is the mode's only state; these hold no mode of their own. */
+  dt_lib_snapshot_t before;
+  GtkWidget *before_after_button;
+  guint before_after_idle;
 } dt_lib_snapshots_t;
 
 /* callback for take snapshot */
 static void _lib_snapshots_add_button_clicked_callback(GtkWidget *widget, gpointer user_data);
 static void _lib_snapshots_toggled_callback(GtkToggleButton *widget, gpointer user_data);
 static void _lib_snapshots_delete_button_clicked_callback(GtkWidget *widget, gpointer user_data);
+static void _before_after_toggled(GtkToggleButton *button, gpointer user_data);
+static gboolean _before_after_add_button_idle(gpointer user_data);
 
 // Reset the value fields to "empty" without releasing the snapshot engine or touching GTK
 // widgets. Used when a snapshot's engine is being handed off to another slot (compacting the
@@ -133,8 +142,11 @@ static void _lib_snapshot_clear_state(dt_lib_snapshot_t *snap)
 // Freeze the current darkroom develop state and render it at `source`'s current viewport (ROI),
 // recomputed as pan/zoom change afterward -- see develop/dev_snapshot.h. The frozen context and
 // its pipe are kept alive for the snapshot's whole lifetime, released by _lib_snapshot_clear_state().
+// `geometry_only` selects what the frozen history renders: FALSE freezes the full live history at
+// its live end (a normal comparison slot); TRUE freezes the "before", where only geometry survives
+// (Phase 1: the full duplicated history at end 0, so every module renders at its defaults).
 // Returns 0 on success, 1 on failure.
-static int _lib_snapshot_capture_state(dt_lib_snapshot_t *snapshot, dt_develop_t *source)
+static int _lib_snapshot_capture_state(dt_lib_snapshot_t *snapshot, dt_develop_t *source, gboolean geometry_only)
 {
   if(IS_NULL_PTR(snapshot) || IS_NULL_PTR(source))
   {
@@ -161,7 +173,9 @@ static int _lib_snapshot_capture_state(dt_lib_snapshot_t *snapshot, dt_develop_t
   dt_pthread_rwlock_rdlock(&source->history_mutex);
   history_copy = dt_history_duplicate(source->history);
   iop_order_copy = dt_ioppr_iop_order_copy_deep(source->iop_order_list);
-  history_end = dt_dev_get_history_end_ext(source);
+  // The before keeps the full duplicated history rendered at end 0 (all modules at defaults); the
+  // live history end is used for a normal slot. Phase 2 filters the list here before this choice.
+  history_end = geometry_only ? 0 : dt_dev_get_history_end_ext(source);
   dt_pthread_rwlock_unlock(&source->history_mutex);
 
   snapshot->imgid = source->image_storage.id;
@@ -231,6 +245,23 @@ void gui_post_expose(dt_lib_module_t *self, cairo_t *cri, int32_t width, int32_t
   dt_lib_snapshots_t *d = (dt_lib_snapshots_t *)self->data;
   if(IS_NULL_PTR(d)) return;
   dt_develop_t *dev = dt_dev_get_global();
+
+  // Before/after view: paint the source full-frame over the whole widget, exactly like
+  // libs/duplicate.c's preview. The source is the selected user slot if one is armed, else the
+  // hidden geometry-only "before". No divider, no split maths -- the whole clip is one image.
+  if(gtk_toggle_button_get_active(GTK_TOGGLE_BUTTON(d->before_after_button)))
+  {
+    dt_lib_snapshot_t *snap = (d->selected > 0) ? d->snapshot + (d->selected - 1) : &d->before;
+    if(dt_dev_snapshot_is_valid(&snap->snap))
+    {
+      float image_box[4] = { 0.0f };
+      dt_dev_get_image_box_in_widget(dev, width, height, image_box);
+      if(image_box[2] > 0.0f && image_box[3] > 0.0f)
+        dt_dev_snapshot_draw(&snap->snap, cri, dev, width, height, image_box[0], image_box[1],
+                             image_box[2], image_box[3]);
+    }
+    return;
+  }
 
   if(d->selected >= 1 && d->selected <= d->size)
   {
@@ -339,6 +370,7 @@ void gui_post_expose(dt_lib_module_t *self, cairo_t *cri, int32_t width, int32_t
 int button_released(struct dt_lib_module_t *self, double x, double y, int which, uint32_t state)
 {
   dt_lib_snapshots_t *d = (dt_lib_snapshots_t *)self->data;
+  if(gtk_toggle_button_get_active(GTK_TOGGLE_BUTTON(d->before_after_button))) return 0;
   const gboolean visible_picker = dt_iop_color_picker_is_visible(dt_dev_get_global());
 
   if(!visible_picker && d->selected > 0 && which == 1)
@@ -359,10 +391,11 @@ static int _lib_snapshot_rotation_cnt = 0;
 int button_pressed(struct dt_lib_module_t *self, double x, double y, double pressure, int which, int type,
                    uint32_t state)
 {
+  dt_lib_snapshots_t *d = (dt_lib_snapshots_t *)self->data;
+  if(gtk_toggle_button_get_active(GTK_TOGGLE_BUTTON(d->before_after_button))) return 0;
+
   // only react to left click
   if(which != 1) return 0;
-
-  dt_lib_snapshots_t *d = (dt_lib_snapshots_t *)self->data;
 
   const gboolean visible_picker = dt_iop_color_picker_is_visible(dt_dev_get_global());
   
@@ -417,6 +450,7 @@ int button_pressed(struct dt_lib_module_t *self, double x, double y, double pres
 int mouse_moved(dt_lib_module_t *self, double x, double y, double pressure, int which)
 {
   dt_lib_snapshots_t *d = (dt_lib_snapshots_t *)self->data;
+  if(gtk_toggle_button_get_active(GTK_TOGGLE_BUTTON(d->before_after_button))) return 0;
 
   const gboolean visible_picker = dt_iop_color_picker_is_visible(dt_dev_get_global());
 
@@ -549,6 +583,16 @@ void gui_init(dt_lib_module_t *self)
                      dt_ui_scroll_wrap(d->snapshots_box, 1, "plugins/darkroom/snapshots/windowheight",
                                        DT_UI_RESIZE_DYNAMIC), TRUE, TRUE, 0);
   gtk_box_pack_start(GTK_BOX(self->widget), GTK_WIDGET(d->take_button), TRUE, TRUE, 0);
+
+  /* module toolbox button: the toggle that reveals the before/after view. The toolbox may not be
+   * registered yet, so registration is retried from an idle callback (same pattern as
+   * libs/shape_manager.c). The button is ref-sunk so this pointer stays valid even after the flow
+   * box is torn down. */
+  d->before_after_button = dtgtk_togglebutton_new(dtgtk_cairo_paint_before_after, 0, NULL);
+  gtk_widget_set_tooltip_text(d->before_after_button, _("Show the image before your edits"));
+  g_object_ref_sink(d->before_after_button);
+  g_signal_connect(G_OBJECT(d->before_after_button), "toggled", G_CALLBACK(_before_after_toggled), self);
+  d->before_after_idle = g_idle_add((GSourceFunc)_before_after_add_button_idle, d);
 }
 
 void gui_cleanup(dt_lib_module_t *self)
@@ -557,9 +601,58 @@ void gui_cleanup(dt_lib_module_t *self)
   dt_lib_snapshots_t *d = (dt_lib_snapshots_t *)self->data;
 
   for(uint32_t k = 0; k < d->size; k++) _lib_snapshot_clear_state(d->snapshot + k);
+  if(d->before_after_idle)
+  {
+    g_source_remove(d->before_after_idle);
+    d->before_after_idle = 0;
+  }
+  _lib_snapshot_clear_state(&d->before);
+  if(!IS_NULL_PTR(d->before_after_button))
+  {
+    g_object_unref(d->before_after_button);
+    d->before_after_button = NULL;
+  }
   dt_free(d->snapshot);
 
   dt_free(self->data);
+}
+
+// Toolbox toggle handler. Capture is blocking and must never run from a draw handler, so it happens
+// here, exactly like the take-snapshot button. On the activate edge the before is captured lazily, once
+// per image (cleared on image change in Phase 3); a failed capture un-presses the button.
+static void _before_after_toggled(GtkToggleButton *button, gpointer user_data)
+{
+  dt_lib_module_t *self = (dt_lib_module_t *)user_data;
+  dt_lib_snapshots_t *d = (dt_lib_snapshots_t *)self->data;
+
+  if(gtk_toggle_button_get_active(button) && !dt_dev_snapshot_is_valid(&d->before.snap))
+  {
+    if(_lib_snapshot_capture_state(&d->before, dt_dev_get_global(), TRUE))
+    {
+      gtk_toggle_button_set_active(button, FALSE);
+      return;
+    }
+  }
+
+  dt_control_queue_redraw_center();
+}
+
+// Retry adding the toolbox button until the module-toolbox proxy exists, then stop. Mirrors
+// libs/shape_manager.c's idle registration; the source id is stored so gui_cleanup() can drop a poll
+// that never succeeded.
+static gboolean _before_after_add_button_idle(gpointer user_data)
+{
+  dt_lib_snapshots_t *d = (dt_lib_snapshots_t *)user_data;
+  if(IS_NULL_PTR(d->before_after_button)) return FALSE;
+
+  if(dt_view_manager_get_global()->proxy.module_toolbox.module)
+  {
+    dt_view_manager_module_toolbox_add(dt_view_manager_get_global(), d->before_after_button,
+                                       DT_VIEW_DARKROOM);
+    d->before_after_idle = 0;
+    return FALSE;
+  }
+  return TRUE;
 }
 
 static void _lib_snapshots_add_button_clicked_callback(GtkWidget *widget, gpointer user_data)
@@ -576,7 +669,7 @@ static void _lib_snapshots_add_button_clicked_callback(GtkWidget *widget, gpoint
   // this click, instead of a rotated slot 0 stuck showing a label for a snapshot that was never
   // created.
   dt_lib_snapshot_t scratch = { 0 };
-  if(_lib_snapshot_capture_state(&scratch, dt_dev_get_global()))
+  if(_lib_snapshot_capture_state(&scratch, dt_dev_get_global(), FALSE))
   {
     _lib_snapshot_clear_state(&scratch);
     return;
