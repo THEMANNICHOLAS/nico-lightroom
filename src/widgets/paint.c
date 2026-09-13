@@ -421,38 +421,41 @@ void dtgtk_cairo_paint_switch(cairo_t *cr, gint x, gint y, gint w, gint h, gint 
   FINISH
 }
 
+// The module on/off switch: a filled disc when the module is active, a hollow ring of the
+// same outer edge when it is not (the ring radius 0.182 plus half of the 0.058 stroke is
+// 0.211, the disc's own edge). The colour is the widget's, from CSS -- hover and the rest
+// of the state feedback belong there, so nothing here reads the prelight flag.
 void dtgtk_cairo_paint_module_switch(cairo_t *cr, gint x, gint y, gint w, gint h, gint flags, void *data)
 {
   PREAMBLE(1, 1, 0, 0)
 
-  const gboolean prelight = flags & CPF_PRELIGHT;
-  const double bar_w = prelight ? 0.76 : 0.16;
-  const double bar_x = 0.5 - bar_w * 0.5;
-  const double bar_y = 0.08;
-  const double bar_h = 0.84;
-  const double radius = bar_w * 0.5;
-
-  cairo_new_sub_path(cr);
-  cairo_arc(cr, bar_x + bar_w - radius, bar_y + radius, radius, -M_PI / 2.0, 0.0);
-  cairo_arc(cr, bar_x + bar_w - radius, bar_y + bar_h - radius, radius, 0.0, M_PI / 2.0);
-  cairo_arc(cr, bar_x + radius, bar_y + bar_h - radius, radius, M_PI / 2.0, M_PI);
-  cairo_arc(cr, bar_x + radius, bar_y + radius, radius, M_PI, 3.0 * M_PI / 2.0);
-  cairo_close_path(cr);
-  cairo_fill(cr);
+  if(flags & CPF_ACTIVE)
+  {
+    cairo_arc(cr, 0.5, 0.5, 0.21, 0.0, 2.0 * M_PI);
+    cairo_fill(cr);
+  }
+  else
+  {
+    cairo_set_line_width(cr, 0.058);
+    cairo_arc(cr, 0.5, 0.5, 0.182, 0.0, 2.0 * M_PI);
+    cairo_stroke(cr);
+  }
 
   FINISH
 }
 
+// A module whose enable button is hidden -- forced on or forced off -- shows a padlock
+// instead of the switch, drawn in a centred box a little over half the icon. Forced-off
+// keeps the CSS opacity and colour rules, forced-on keeps the accent.
 void dtgtk_cairo_paint_module_switch_on(cairo_t *cr, gint x, gint y, gint w, gint h, gint flags, void *data)
 {
-  PREAMBLE(1, 1, 0, 0)
+  const double scale = 0.55;
+  const double bw = w * scale;
+  const double bh = h * scale;
 
-  const double dot_radius = 0.09;
-
-  cairo_arc(cr, 0.5, 0.5, dot_radius, 0.0, 2.0 * M_PI);
-  cairo_fill(cr);
-
-  FINISH
+  // Round the origin so the padlock stays centred when the shrunk box is not a whole number.
+  dtgtk_cairo_paint_lock(cr, (gint)(x + (w - bw) / 2.0 + 0.5), (gint)(y + (h - bh) / 2.0 + 0.5), (gint)bw,
+                         (gint)bh, flags, data);
 }
 
 void dtgtk_cairo_paint_switch_inactive(cairo_t *cr, gint x, gint y, gint w, gint h, gint flags, void *data)
