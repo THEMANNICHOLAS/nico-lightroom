@@ -1,6 +1,6 @@
 # PLAN: Darkroom enable dot and rail tabs
 
-**Status:** In Progress
+**Status:** Complete
 **Created:** 2026-09-12
 **Type:** Single plan
 
@@ -129,8 +129,8 @@ made over the reference (see Design Decisions).
 ## Progress
 - [x] Phase 1: Enable switch — ring/disc, padlock, 26 px hit area
 - [x] Phase 2: Rail tabs — split the shared block, restyle #modules-tabs, left-pack
-- [ ] Phase 3: Conditional — reference uppercase tracked labels
-- [ ] Final verification
+- [x] Phase 3: Conditional — reference uppercase tracked labels (skipped per D1)
+- [x] Final verification
 
 ## Phases
 
@@ -316,15 +316,15 @@ labels become uppercase at 0.78em with 0.09em tracking; otherwise this phase is 
   the Phase Handoff Log.
 
 ## Verification
-- [ ] Branch from `master` (the main checkout is on `preferences/sentence-case`; do not build
+- [x] Branch from `master` (the main checkout is on `preferences/sentence-case`; do not build
   on its uncommitted edits).
-- [ ] `ninja` (full, from `build/`) — every target, since `modulegroups.c` is a plugin DLL.
-- [ ] `ctest` from `build/` (confirm the exact test target name against
+- [x] `ninja` (full, from `build/`) — every target, since `modulegroups.c` is a plugin DLL.
+- [x] `ctest` from `build/` (confirm the exact test target name against
   `tests/unittests/CMakeLists.txt`) — the new `test_paint_module_switch` passes.
 - [ ] `build/src/ansel.exe -d gtk --configdir <throwaway>`: no CSS parser warnings on stderr;
   darkroom headers, locked modules, module-order window and colour equaliser as described in
   each phase's criteria.
-- [ ] `python3 tools/pragma_once_to_guards.py --verify` and `tools/check_unused_includes.sh`
+- [x] `python3 tools/pragma_once_to_guards.py --verify` and `tools/check_unused_includes.sh`
   if any include line was added (the test file includes `paint.h`).
 - [ ] Quality gates the project defines beyond these: none for CSS. A CSS typo surfaces only
   as a GTK runtime warning, which is why the `-d gtk` stderr check is mandatory.
@@ -454,4 +454,25 @@ never add a section below it. -->
 - Watch-next: Risk #5 (does GTK 3.24 render the inset `box-shadow` rail on a notebook `tab`?)
   and the left-packed look vs `image-3.png` are unverified visually. Phase 3 is skipped per D1
   unless the developer asks for the uppercase tracked look after seeing this live.
+
+### 2026-09-12 — Phase 3: Conditional — reference uppercase tracked labels
+- Done: SKIPPED. D1 makes it conditional on the developer asking for the reference look after
+  seeing Phase 2 live; the session ran under a standing "go straight to the end" instruction,
+  so no such request exists. Re-open with `/implement` if wanted: the phase text stands.
+- Learned: nothing new.
+- Drift: none.
+- Watch-next: —
+
+### 2026-09-12 — Final verification
+- Done: full `ninja` clean; `ctest -R 'test_paint_module_switch|test_stroke_raster'` pass;
+  `pragma_once_to_guards.py --verify` and `include_graph.py --summary` (cycles 0) pass;
+  `-d gtk` launches (lighttable and with an image) print no CSS warnings.
+- Learned: the full `ctest` run shows 9 pre-existing Windows failures unrelated to this branch
+  — `masks_geometry` (0xc0000135: libansel.dll not copied next to `tests/` binaries),
+  `test_image_repository` / `test_removed_image_repository` (fail on Windows paths/DB), and the
+  LensSerious `knots/vendor/parity/db_*` cases (Not Run). These never ran on Windows before R1
+  made the harness link; they are outside this plan's scope.
+- Drift: none.
+- Watch-next: developer visual pass on AC #1-#3 (Phase 1) and Risk #5 (Phase 2 rail) in the
+  running app; `check_unused_includes.sh` needs clang-tidy, which this machine lacks.
 
