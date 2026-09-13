@@ -128,7 +128,7 @@ made over the reference (see Design Decisions).
 
 ## Progress
 - [x] Phase 1: Enable switch — ring/disc, padlock, 26 px hit area
-- [ ] Phase 2: Rail tabs — split the shared block, restyle #modules-tabs, left-pack
+- [x] Phase 2: Rail tabs — split the shared block, restyle #modules-tabs, left-pack
 - [ ] Phase 3: Conditional — reference uppercase tracked labels
 - [ ] Final verification
 
@@ -256,7 +256,7 @@ equaliser's ring tabs render exactly as before.
 - Uppercase/tracking (Phase 3).
 
 **Manual verification:**
-- [ ] Extract colorequal declarations before and after and diff:
+- [x] Extract colorequal declarations before and after and diff:
   `git show master:data/themes/ansel.css | grep -A6 'colorequal-ring-tabs'` vs the same
   on the working tree — expected: identical declaration values for every
   `#colorequal-ring-tabs` selector.
@@ -265,7 +265,7 @@ equaliser's ring tabs render exactly as before.
   group, grey underline on hover, chevrons visible when the panel is narrower than the
   seven labels. Compare against `image-3.png`.
 - [ ] Open the colour equaliser: its ring tabs look exactly as on `master`.
-- [ ] GTK prints no CSS parser warnings on stderr at startup or on hot-reload.
+- [x] GTK prints no CSS parser warnings on stderr at startup or on hot-reload.
 
 **Steps:**
 1. Split `ansel.css:1061-1181` into the colorequal half (verbatim) and the `#modules-tabs`
@@ -274,8 +274,8 @@ equaliser's ring tabs render exactly as before.
 3. Full `ninja`; run the manual verification above.
 
 **Acceptance criteria:**
-- [ ] The colorequal diff check above shows no changed declaration.
-- [ ] `git diff src/libs/modulegroups.c` is exactly two changed lines.
+- [x] The colorequal diff check above shows no changed declaration.
+- [x] `git diff src/libs/modulegroups.c` is exactly two changed lines.
 
 ### Phase 3: Conditional — reference uppercase tracked labels
 **Risk:** flagged (!#6)
@@ -408,6 +408,14 @@ Append-only, empty at plan creation. -->
   `test_stroke_raster.c:36-47` — move to a shared test header on the third copy.
 - **defer:** `tools/check_unused_includes.sh` cannot run here (`clang-tidy not found`); the
   added includes are the test's cairo/cmocka set and `win/main_wrapper.h`, all used.
+- **defer (Phase 2):** `dt_modulegroups_tab_label` has a third consumer,
+  `src/iop/colorprimaries.c:1276,1312`, on an unnamed notebook — untouched here because every
+  rule is id-prefixed, but a future bare-class rule would hit three modules.
+- **act (Phase 2):** `#modules-tabs notebook tab:hover { background-color: transparent }` is
+  load-bearing — it overrides the global `notebook tab:hover { background-color:
+  @button_hover_bg }` further down the file. Do not remove it as boilerplate.
+- **act (Phase 2):** one reviewer simplification applied — a duplicated comment sentence above
+  the `tab label` rule was trimmed.
 - **watch:** measured padlock shackle alpha 62 at the apex vs 255 body — the pen is scaled by
   `_lock`'s internal `cairo_scale(.2,.4)` regardless of box size. Visual call for the developer;
   a bolder shackle means editing `dtgtk_cairo_paint_lock()` (out of scope).
@@ -432,4 +440,18 @@ never add a section below it. -->
   window) are visual and unverified — check them in the running app before or with Phase 2's
   own visual pass. Phase 2 edits `ansel.css:1061-1181` — the block now starts ~16 lines later
   because Phase 1's block grew; locate by selector, not by line.
+
+### 2026-09-12 — Phase 2: Rail tabs — split the shared block, restyle #modules-tabs, left-pack
+- Done: shared tab block split; 19 `#colorequal-ring-tabs` rules reproduced with identical
+  declaration bodies (checked by script against `HEAD`); `#modules-tabs` rail rules per
+  reference EDIT 2 with D1 deltas (1.05em/500, 700 checked, no letter-spacing) and EDIT 3
+  chevrons; `modulegroups.c` hexpand/tab-expand FALSE (2 lines). Full `ninja`, `ninja install`
+  and a `-d gtk` launch with an image are clean (no CSS warnings). Reviewer: clean.
+- Learned: `ninja install` regenerates man pages after every commit and needs msys2's perl
+  (`PATH=/c/msys64/mingw64/bin:/c/msys64/usr/bin:$PATH`); Git Bash's perl lacks Pod::Man. The
+  desktop session cannot screenshot the app (capture is black), so visual acceptance is manual.
+- Drift: none.
+- Watch-next: Risk #5 (does GTK 3.24 render the inset `box-shadow` rail on a notebook `tab`?)
+  and the left-packed look vs `image-3.png` are unverified visually. Phase 3 is skipped per D1
+  unless the developer asks for the uppercase tracked look after seeing this live.
 
