@@ -115,7 +115,7 @@
 /* General Base Colors */
 @define-color selected_bg_color @slate_36;
 @define-color border_color @grey_40;
-@define-color bg_color @slate_20;
+@define-color bg_color #222426;
 @define-color fg_color @grey_100;
 @define-color base_color @fg_color;
 @define-color text_color @grey_35;
