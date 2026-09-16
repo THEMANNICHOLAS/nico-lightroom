@@ -458,8 +458,6 @@ static void export_clicked(GtkWidget *w, gpointer user_data)
         else
         {
           /* create and run dialog */
-          char overwrite_str[256];
-
           gint overwrite_dialog_res = GTK_RESPONSE_ACCEPT;
           gint overwrite_dialog_check_button_res = TRUE;
 
@@ -472,8 +470,9 @@ static void export_clicked(GtkWidget *w, gpointer user_data)
 
             // contents for dialog
             GtkWidget *content_area = gtk_dialog_get_content_area(GTK_DIALOG(dialog_overwrite_export));
-            sprintf(overwrite_str, _("style `%s' already exists.\ndo you want to overwrite existing style?\n"), (char*)style->data);
+            gchar *overwrite_str = g_strdup_printf(_("style `%s' already exists.\ndo you want to overwrite existing style?\n"), (char*)style->data);
             GtkWidget *label = gtk_label_new(overwrite_str);
+            dt_free(overwrite_str);
             GtkWidget *overwrite_dialog_check_button = gtk_check_button_new_with_label(_("apply this option to all existing styles"));
 
             gtk_container_add(GTK_CONTAINER(content_area), label);
@@ -641,8 +640,6 @@ static void import_clicked(GtkWidget *w, gpointer user_data)
         else
         {
           /* create and run dialog */
-          char overwrite_str[256];
-
           gint overwrite_dialog_res = GTK_RESPONSE_ACCEPT;
           gint overwrite_dialog_check_button_res = TRUE;
 
@@ -656,8 +653,9 @@ static void import_clicked(GtkWidget *w, gpointer user_data)
 
             // contents for dialog
             GtkWidget *content_area = gtk_dialog_get_content_area(GTK_DIALOG(dialog_overwrite_import));
-            sprintf(overwrite_str, _("style `%s' already exists.\ndo you want to overwrite existing style?\n"), (char*)filename->data);
+            gchar *overwrite_str = g_strdup_printf(_("style `%s' already exists.\ndo you want to overwrite existing style?\n"), (char*)filename->data);
             GtkWidget *label = gtk_label_new(overwrite_str);
+            dt_free(overwrite_str);
             GtkWidget *overwrite_dialog_check_button = gtk_check_button_new_with_label(_("apply this option to all existing styles"));
 
             gtk_container_add(GTK_CONTAINER(content_area), label);
