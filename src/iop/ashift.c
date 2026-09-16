@@ -1110,8 +1110,8 @@ void distort_mask(struct dt_iop_module_t *self, const struct dt_dev_pixelpipe_t 
       pin[1] -= roi_in->y;
 
       // get output values by interpolation from input image
-      dt_interpolation_compute_pixel4c(interpolation, in, _out + i, pin[0], pin[1], roi_in->width,
-                                       roi_in->height, roi_in->width);
+      _out[i] = dt_interpolation_compute_sample(interpolation, in, pin[0], pin[1], roi_in->width, roi_in->height, 1,
+                                                roi_in->width);
     }
   }
 }
