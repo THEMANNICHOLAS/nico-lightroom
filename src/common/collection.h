@@ -379,7 +379,8 @@ void dt_collection_update_query(const dt_collection_t *collection, dt_collection
 /** updates the hint message for collection */
 void dt_collection_hint_message(const dt_collection_t *collection);
 
-/* serialize and deserialize into a string. */
+/* serialize and deserialize into a string. serialize returns 0 when the whole collection fit
+   in buf, -1 when it was truncated; buf is NUL-terminated either way. */
 void dt_collection_deserialize(const char *buf);
 int dt_collection_serialize(char *buf, int bufsize);
 

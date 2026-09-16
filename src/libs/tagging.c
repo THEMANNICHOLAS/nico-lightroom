@@ -2092,7 +2092,9 @@ static void _pop_menu_dictionary_goto_tag_collection(GtkWidget *menuitem, dt_lib
     gtk_tree_model_get(model, &iter, DT_LIB_TAGGING_COL_PATH, &path, DT_LIB_TAGGING_COL_COUNT, &count, -1);
     if(count)
     {
-      if(!d->collection[0]) dt_collection_serialize(d->collection, 4096);
+      // Only offer "go back to work" when the whole collection was captured: a truncated
+      // string would take the user back to a different collection.
+      if(!d->collection[0] && dt_collection_serialize(d->collection, 4096) != 0) d->collection[0] = '\0';
       gchar *tag_collection = g_strdup_printf("1:0:%d:%s$", DT_COLLECTION_PROP_TAG, path);
       dt_control_signal_block_by_func(dt_control_signal_get_global(), G_CALLBACK(_collection_updated_callback), self);
       dt_collection_deserialize(tag_collection);

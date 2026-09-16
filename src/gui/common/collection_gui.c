@@ -38,7 +38,8 @@ static void _update_recentcollections()
   // Serialize current request
   char confname[200] = { 0 };
   char buf[4096];
-  dt_collection_serialize(buf, sizeof(buf));
+  // A truncated line would restore a different collection than the one being recorded.
+  if(dt_collection_serialize(buf, sizeof(buf)) != 0) return;
 
   int n = -1;
   gboolean found_duplicate = FALSE;

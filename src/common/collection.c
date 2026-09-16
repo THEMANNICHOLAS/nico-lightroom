@@ -89,6 +89,7 @@
 #include <assert.h>
 #include <glib.h>
 #include <memory.h>
+#include <stdarg.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <unistd.h>
@@ -717,26 +718,36 @@ GList *dt_collection_get_property_values(const dt_collection_properties_t proper
   return dt_collection_query_get_property_values(&req);
 }
 
+// Formats into *buf and advances it, or returns FALSE when the output does not fit: vsnprintf
+// returns the length it WOULD have written, so applying it unchecked walks buf past the end and
+// drives bufsize negative (which the next call reads as a huge size_t). On FALSE the buffer is
+// still NUL-terminated at the truncation point and buf/bufsize are left where they were.
+static gboolean _serialize_append(char **buf, int *bufsize, const char *fmt, ...) G_GNUC_PRINTF(3, 4);
+static gboolean _serialize_append(char **buf, int *bufsize, const char *fmt, ...)
+{
+  va_list ap;
+  va_start(ap, fmt);
+  const int c = vsnprintf(*buf, *bufsize, fmt, ap);
+  va_end(ap);
+  if(c < 0 || c >= *bufsize) return FALSE;
+  *buf += c;
+  *bufsize -= c;
+  return TRUE;
+}
+
 int dt_collection_serialize(char *buf, int bufsize)
 {
   char confname[200];
-  int c;
   const int num_rules = dt_conf_get_int("plugins/lighttable/collect/num_rules");
-  c = snprintf(buf, bufsize, "%d:", num_rules);
-  buf += c;
-  bufsize -= c;
+  if(!_serialize_append(&buf, &bufsize, "%d:", num_rules)) return -1;
   for(int k = 0; k < num_rules; k++)
   {
     snprintf(confname, sizeof(confname), "plugins/lighttable/collect/mode%1d", k);
     const int mode = dt_conf_get_int(confname);
-    c = snprintf(buf, bufsize, "%d:", mode);
-    buf += c;
-    bufsize -= c;
+    if(!_serialize_append(&buf, &bufsize, "%d:", mode)) return -1;
     snprintf(confname, sizeof(confname), "plugins/lighttable/collect/item%1d", k);
     const int item = dt_conf_get_int(confname);
-    c = snprintf(buf, bufsize, "%d:", item);
-    buf += c;
-    bufsize -= c;
+    if(!_serialize_append(&buf, &bufsize, "%d:", item)) return -1;
     snprintf(confname, sizeof(confname), "plugins/lighttable/collect/string%1d", k);
     const char *str = dt_conf_get_string_const(confname);
     // Fold the recursive flag back into the trailing '*' this wire format has always used, so
@@ -749,13 +760,13 @@ int dt_collection_serialize(char *buf, int bufsize)
       if(dt_conf_get_bool(confname)) str_recursive = g_strconcat(str, "*", NULL);
     }
     const char *emit = str_recursive ? str_recursive : str;
+    gboolean fits;
     if(emit && (emit[0] != '\0'))
-      c = snprintf(buf, bufsize, "%s$", emit);
+      fits = _serialize_append(&buf, &bufsize, "%s$", emit);
     else
-      c = snprintf(buf, bufsize, "%%$");
+      fits = _serialize_append(&buf, &bufsize, "%%$");
     g_free(str_recursive);
-    buf += c;
-    bufsize -= c;
+    if(!fits) return -1;
   }
   return 0;
 }
