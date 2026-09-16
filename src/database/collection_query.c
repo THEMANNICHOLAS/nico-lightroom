@@ -889,6 +889,7 @@ static int _recompose(void){
     /* add text filter if any */
     if(_params.text_filter && _params.text_filter[0])
     {
+      char *escaped_text = sqlite3_mprintf("%q", _params.text_filter);
       // clang-format off
       wq = dt_util_dstrcat(wq, " %s id IN (SELECT id FROM main.meta_data WHERE value LIKE '%s'"
                                           " UNION SELECT imgid AS id FROM main.tagged_images AS ti, data.tags AS t"
@@ -897,12 +898,13 @@ static int _recompose(void){
                                           "   WHERE filename LIKE '%s'"
                                           " UNION SELECT i.id FROM main.images AS i, main.film_rolls AS fr"
                                           "   WHERE fr.id=i.film_id AND fr.folder LIKE '%s')",
-                           and_operator(&and_term), _params.text_filter,
-                                                    _params.text_filter,
-                                                    _params.text_filter,
-                                                    _params.text_filter,
-                                                    _params.text_filter);
+                           and_operator(&and_term), escaped_text,
+                                                    escaped_text,
+                                                    escaped_text,
+                                                    escaped_text,
+                                                    escaped_text);
       // clang-format on
+      sqlite3_free(escaped_text);
     }
 
     /* add colorlabel filter if any */
