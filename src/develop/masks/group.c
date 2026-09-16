@@ -288,10 +288,14 @@ static dt_masks_raster_result_t _group_get_mask(const dt_iop_module_t *const mod
    * to drag the group's bounding box to garbage. */
   int nb_ok = 0;
   dt_masks_raster_result_t err = DT_MASKS_RASTER_OK;
+  /* Members are resolved through pipe->forms, the refcounted snapshot this run owns -- never
+   * dev->forms, which the GUI thread is mutating while this runs on a worker (same rule as
+   * _group_get_mask_roi() below). */
+  GList *const masks = !IS_NULL_PTR(pipe) && !IS_NULL_PTR(pipe->forms) ? pipe->forms : module->dev->forms;
   for(GList *fpts = form->points; fpts; fpts = g_list_next(fpts))
   {
     dt_masks_form_group_t *fpt = (dt_masks_form_group_t *)fpts->data;
-    dt_masks_form_t *sel = dt_masks_get_from_id(module->dev, fpt->formid);
+    dt_masks_form_t *sel = dt_masks_get_from_id_ext(masks, fpt->formid);
     if(sel)
     {
       const dt_masks_raster_result_t child
