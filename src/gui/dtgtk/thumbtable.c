@@ -2191,6 +2191,7 @@ void dt_thumbtable_cleanup(dt_thumbtable_t *table)
   DT_DEBUG_CONTROL_SIGNAL_DISCONNECT(dt_control_signal_get_global(), G_CALLBACK(_dt_active_images_changed_callback), table);
   DT_DEBUG_CONTROL_SIGNAL_DISCONNECT(dt_control_signal_get_global(), G_CALLBACK(_dt_profile_change_callback), table);
   DT_DEBUG_CONTROL_SIGNAL_DISCONNECT(dt_control_signal_get_global(), G_CALLBACK(_dt_image_info_changed_callback), table);
+  DT_DEBUG_CONTROL_SIGNAL_DISCONNECT(dt_control_signal_get_global(), G_CALLBACK(_mouse_over_image_callback), table);
 
   _dt_thumbtable_empty_list(table);
 
