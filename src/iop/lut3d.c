@@ -488,6 +488,7 @@ uint16_t calculate_clut_cube(const char *const filepath, float **clut)
           dt_pixelpipe_cache_free_align(lclut);
           dt_free(line);
           fclose(cube_file);
+          return 0;
         }
       }
       else if (strcmp("DOMAIN_MAX", token[0]) == 0)
@@ -499,6 +500,7 @@ uint16_t calculate_clut_cube(const char *const filepath, float **clut)
           dt_pixelpipe_cache_free_align(lclut);
           dt_free(line);
           fclose(cube_file);
+          return 0;
         }
       }
       else if (strcmp("LUT_1D_SIZE", token[0]) == 0)
@@ -511,11 +513,28 @@ uint16_t calculate_clut_cube(const char *const filepath, float **clut)
       }
       else if (strcmp("LUT_3D_SIZE", token[0]) == 0)
       {
+        if(!IS_NULL_PTR(lclut))
+        {
+          fprintf(stderr, "[lut3d] error - LUT 3D size is defined twice\n");
+          dt_control_log(_("error - cube lut size is defined twice"));
+          dt_pixelpipe_cache_free_align(lclut);
+          dt_free(line);
+          fclose(cube_file);
+          return 0;
+        }
         level = atoll(token[1]);
         if(level > 256)
         {
           fprintf(stderr, "[lut3d] error - LUT 3D size %d > 256\n", level);
           dt_control_log(_("error - lut 3D size %d exceeds the maximum supported"), level);
+          dt_free(line);
+          fclose(cube_file);
+          return 0;
+        }
+        if(level < 2)
+        {
+          fprintf(stderr, "[lut3d] error - LUT 3D size %d < 2\n", level);
+          dt_control_log(_("error - lut 3D size %d is not valid"), level);
           dt_free(line);
           fclose(cube_file);
           return 0;
@@ -538,6 +557,15 @@ uint16_t calculate_clut_cube(const char *const filepath, float **clut)
         {
           fprintf(stderr, "[lut3d] error - cube lut size is not defined\n");
           dt_control_log(_("error - cube lut size is not defined"));
+          dt_free(line);
+          fclose(cube_file);
+          return 0;
+        }
+        if (i + 3 > buf_size)
+        {
+          fprintf(stderr, "[lut3d] error - cube lut has more than %d lines\n", (int)buf_size/3);
+          dt_control_log(_("error - cube lut has more than %d lines"), (int)buf_size/3);
+          dt_pixelpipe_cache_free_align(lclut);
           dt_free(line);
           fclose(cube_file);
           return 0;
