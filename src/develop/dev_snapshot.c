@@ -46,9 +46,9 @@
 // viewport once that job's completion triggers the next redraw -- the same effect a delay would
 // have bought, without adding latency once a job slot is actually free.
 //
-// `job`, `pending_roi`, `last_roi`, `roi_valid` are shared between the GUI thread and the job's
-// worker thread and guarded by `lock`. Everything else here is only ever touched from the GUI
-// thread. `pipe`/`preview_pipe` themselves need no extra locking beyond that: dt_dev_lock_pipe_surface()
+// `job`, `pending_roi`, `pending_request`, `last_roi`, `roi_valid` are shared between the GUI thread
+// and the job's worker thread and guarded by `lock`. Everything else here is only ever touched from
+// the GUI thread. `pipe`/`preview_pipe` themselves need no extra locking beyond that: dt_dev_lock_pipe_surface()
 // (views/dev_backbuf.c) and the pixelpipe cache are already built for exactly one writer
 // (whichever thread calls dt_dev_pixelpipe_process()) concurrent with the GUI thread reading the
 // published backbuf -- the same guarantee that already makes dev->pipe safe between the darkroom
@@ -72,9 +72,10 @@ typedef struct dt_dev_snapshot_engine_t
   dt_iop_roi_t preview_last_roi;
   gboolean preview_roi_valid;
 
-  dt_pthread_mutex_t lock;    // guards the four fields below only.
+  dt_pthread_mutex_t lock;    // guards the five fields below only.
   dt_job_t *job;
   dt_iop_roi_t pending_roi;
+  dt_dev_roi_request_t pending_request;
   dt_iop_roi_t last_roi;
   gboolean roi_valid;
 
@@ -203,10 +204,19 @@ static gboolean _roi_equal(const dt_iop_roi_t *a, const dt_iop_roi_t *b)
 // committed, and the next process() at a different size reads/writes with the wrong geometry --
 // each row starting from the wrong offset (a diagonal shear), because the piece never learned its
 // target size actually changed.
-static gboolean _process_at_roi(dt_dev_snapshot_engine_t *engine, dt_dev_pixelpipe_t *pipe, const dt_iop_roi_t *roi)
+//
+// The pipe is re-run at a scale derived from the live viewport, so it must carry that viewport's
+// request: finalscale has no history stack and re-commits its enable decision from the latched
+// request during the dt_dev_pixelpipe_change() pass just below. Left with a pipe that never got
+// latched, it reads the neutral request (natural_scale = -1) and decides against a scale the ROI
+// was never planned from. Same latch the darkroom worker performs on dev->pipe each iteration
+// (develop.c, dt_dev_roi_request_get() -> dt_dev_roi_request_latch()).
+static gboolean _process_at_roi(dt_dev_snapshot_engine_t *engine, dt_dev_pixelpipe_t *pipe,
+                                const dt_iop_roi_t *roi, const dt_dev_roi_request_t *request)
 {
   dt_dev_pixelpipe_set_input(pipe, engine->frozen->image_storage.id, engine->raw_width, engine->raw_height,
                              engine->raw_iscale, DT_MIPMAP_FULL);
+  dt_dev_roi_request_latch(pipe, request);
   dt_dev_pixelpipe_or_changed(pipe, DT_DEV_PIPE_ZOOMED);
   dt_dev_pixelpipe_change(pipe);
   return dt_dev_pixelpipe_process(pipe, *roi) == 0;
@@ -220,15 +230,17 @@ static void _sync_preview_now(dt_dev_snapshot_engine_t *engine, dt_develop_t *de
   if(!_compute_preview_roi(dev, engine->preview_pipe, &roi)) return;
   if(engine->preview_roi_valid && _roi_equal(&engine->preview_last_roi, &roi)) return;
 
-  engine->preview_roi_valid = _process_at_roi(engine, engine->preview_pipe, &roi);
+  const dt_dev_roi_request_t request = dt_dev_roi_request_get(dev);
+  engine->preview_roi_valid = _process_at_roi(engine, engine->preview_pipe, &roi, &request);
   if(engine->preview_roi_valid) engine->preview_last_roi = roi;
 }
 
 // Runs the accurate main tier at `roi` right now and publishes the result under `lock`. Used
 // directly (no job) for the capture-time smoke test, and by the recompute job otherwise.
-static gboolean _sync_main_now(dt_dev_snapshot_engine_t *engine, const dt_iop_roi_t *roi)
+static gboolean _sync_main_now(dt_dev_snapshot_engine_t *engine, const dt_iop_roi_t *roi,
+                               const dt_dev_roi_request_t *request)
 {
-  const gboolean ok = _process_at_roi(engine, engine->pipe, roi);
+  const gboolean ok = _process_at_roi(engine, engine->pipe, roi, request);
   dt_pthread_mutex_lock(&engine->lock);
   engine->roi_valid = ok;
   if(ok) engine->last_roi = *roi;
@@ -249,10 +261,11 @@ static int32_t _recompute_job_run(dt_job_t *job)
   // result -- same guard as dtgtk/thumbnail.c's _get_image_buffer().
   const gboolean stale = engine->job != job || dt_control_job_get_state(job) == DT_JOB_STATE_CANCELLED;
   const dt_iop_roi_t roi = engine->pending_roi;
+  const dt_dev_roi_request_t request = engine->pending_request;
   dt_pthread_mutex_unlock(&engine->lock);
   if(stale) return 1;
 
-  const gboolean ok = _process_at_roi(engine, engine->pipe, &roi);
+  const gboolean ok = _process_at_roi(engine, engine->pipe, &roi, &request);
 
   dt_pthread_mutex_lock(&engine->lock);
   if(engine->job == job)
@@ -280,11 +293,16 @@ static int32_t _recompute_job_run(dt_job_t *job)
 // the still-stale roi on that next call, and calls back in here to start a fresh job for whatever
 // dev's viewport has become by then -- so responsiveness is bounded by "how fast one job finishes",
 // not by a fixed delay.
-static void _schedule_main_recompute(dt_dev_snapshot_engine_t *engine, const dt_iop_roi_t *roi)
+static void _schedule_main_recompute(dt_dev_snapshot_engine_t *engine, const dt_iop_roi_t *roi,
+                                     const dt_dev_roi_request_t *request)
 {
   dt_pthread_mutex_lock(&engine->lock);
   const gboolean job_active = !IS_NULL_PTR(engine->job);
-  if(!job_active) engine->pending_roi = *roi;
+  if(!job_active)
+  {
+    engine->pending_roi = *roi;
+    engine->pending_request = *request;
+  }
   dt_pthread_mutex_unlock(&engine->lock);
   if(job_active) return;
 
@@ -506,8 +524,9 @@ gboolean dt_dev_snapshot_capture(dt_dev_snapshot_t *snap, dt_develop_t *dev, int
   // already rely on), and primes the first draw so it is never a blank frame.
   dt_iop_roi_t roi = { 0 };
   gboolean ok = FALSE;
+  const dt_dev_roi_request_t request = dt_dev_roi_request_get(dev);
   if(_compute_main_roi(dev, engine->pipe, &roi))
-    ok = _sync_main_now(engine, &roi);
+    ok = _sync_main_now(engine, &roi, &request);
   _sync_preview_now(engine, dev);
 
   engine->captured = ok;
@@ -537,6 +556,7 @@ void dt_dev_snapshot_draw(dt_dev_snapshot_t *snap, cairo_t *cri, struct dt_devel
 
   dt_iop_roi_t want_roi = { 0 };
   const gboolean want_ok = _compute_main_roi(dev, engine->pipe, &want_roi);
+  const dt_dev_roi_request_t request = dt_dev_roi_request_get(dev);
   _sync_preview_now(engine, dev);
 
   dt_pthread_mutex_lock(&engine->lock);
@@ -545,7 +565,7 @@ void dt_dev_snapshot_draw(dt_dev_snapshot_t *snap, cairo_t *cri, struct dt_devel
   dt_pthread_mutex_unlock(&engine->lock);
 
   const gboolean main_ready = want_ok && roi_valid && _roi_equal(&last_roi, &want_roi);
-  if(want_ok && !main_ready) _schedule_main_recompute(engine, &want_roi);
+  if(want_ok && !main_ready) _schedule_main_recompute(engine, &want_roi, &request);
 
   if(!main_ready && !engine->preview_roi_valid) return;
 
