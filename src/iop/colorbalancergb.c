@@ -48,6 +48,7 @@
 #include "common/logging.h"
 #include "common/module_versioning.h"
 #include "pixel/chromatic_adaptation.h"
+#include "pixel/colorequal_shared.h"
 #include "common/colorspaces_inline_conversions.h"
 #include "common/opencl.h"
 #include "develop/blend.h"
@@ -62,7 +63,9 @@
 #include "iop/iop_api.h"
 
 //#include <gtk/gtk.h>
+#include <stddef.h>
 #include <stdlib.h>
+#include "widgets/colorwheel.h"
 #include "widgets/label.h"
 #include "widgets/notebook.h"
 #include "widgets/scroll_wrap.h"
@@ -76,6 +79,24 @@
 #define ANGLE_SHIFT -30.f
 #define DEG_TO_RAD(x) ((x + ANGLE_SHIFT) * M_PI / 180.f)
 #define RAD_TO_DEG(x) (x * 180.f / M_PI - ANGLE_SHIFT)
+
+// The soft maxima of the four chroma sliders, which the wheels divide by to map a puck radius
+// onto a param chroma.
+#define CBRGB_SOFT_MAX_C_GLOBAL 0.0075f
+#define CBRGB_SOFT_MAX_C_SHADOWS 0.375f
+#define CBRGB_SOFT_MAX_C_HIGHLIGHTS 0.15f
+#define CBRGB_SOFT_MAX_C_MIDTONES 0.075f
+
+// Which param hue sits at a wheel's 12 o'clock. The mapping is ADDITIVE in both directions --
+// never a reflection -- so the wheel and the hue slider always turn the same way.
+#define WHEEL_HUE_ORIGIN 0.f
+
+// The disc's display ramp. The chroma slider stops use Y = 0.75 and C = 0.2 but only look
+// saturated because they max-normalise out of gamut; here the rim is searched DOWN from MAX_C
+// until every hue fits the display profile, and at Y = 0.75 that leaves a rim too pale to read
+// as a hue picker (sRGB: 0.041). Y = 0.6 keeps the rim legible (0.072); do not restore 0.75.
+#define WHEEL_DISC_Y 0.6f
+#define WHEEL_DISC_MAX_C 0.2f
 
 DT_MODULE_INTROSPECTION(5, dt_iop_colorbalancergb_params_t)
 
@@ -143,6 +164,25 @@ typedef enum dt_iop_colorbalancergb_mask_data_t
 } dt_iop_colorbalancergb_mask_data_t;
 
 
+/** One zone's wheel, as offsets rather than pointers: the same handler serves every zone, and a
+ * descriptor that stored widget pointers would have to be built after gui_init instead of being
+ * a static constant. `off_H`/`off_C` are into the params struct, the other three into gui_data. */
+typedef struct
+{
+  const char *name;
+  float soft_max_C;
+  size_t off_H, off_C;
+  size_t off_slider_H, off_slider_C, off_wheel;
+} dt_cbrgb_wheel_zone_t;
+
+/** What a wheel's signal handlers are handed: the module and which zone the wheel edits. Lives
+ * in gui_data, so its address is stable for as long as the handlers are connected. */
+typedef struct
+{
+  dt_iop_module_t *self;
+  const dt_cbrgb_wheel_zone_t *zone;
+} dt_cbrgb_wheel_binding_t;
+
 typedef struct dt_iop_colorbalancergb_gui_data_t
 {
   GtkWidget *shadows_H, *midtones_H, *highlights_H, *global_H;
@@ -159,7 +199,131 @@ typedef struct dt_iop_colorbalancergb_gui_data_t
   GtkNotebook *notebook;
   gboolean mask_display;
   dt_iop_colorbalancergb_mask_data_t mask_type;
+  GtkWidget *shadows_wheel;
+  dt_cbrgb_wheel_binding_t shadows_binding;
+  // The display profile the wheel rasters were last painted for, compared as a pointer and never
+  // dereferenced, and the rim chroma searched for it.
+  const dt_iop_order_iccprofile_info_t *wheel_profile;
+  float wheel_rim_chroma;
 } dt_iop_colorbalancergb_gui_data_t;
+
+static const dt_cbrgb_wheel_zone_t _wheel_zone_shadows
+    = { N_("shadows"), CBRGB_SOFT_MAX_C_SHADOWS,
+        offsetof(dt_iop_colorbalancergb_params_t, shadows_H),
+        offsetof(dt_iop_colorbalancergb_params_t, shadows_C),
+        offsetof(dt_iop_colorbalancergb_gui_data_t, shadows_H),
+        offsetof(dt_iop_colorbalancergb_gui_data_t, shadows_C),
+        offsetof(dt_iop_colorbalancergb_gui_data_t, shadows_wheel) };
+
+static float *_zone_param(dt_iop_colorbalancergb_params_t *p, size_t off)
+{
+  return (float *)((char *)p + off);
+}
+
+static GtkWidget *_zone_widget(dt_iop_colorbalancergb_gui_data_t *g, size_t off)
+{
+  return *(GtkWidget **)((char *)g + off);
+}
+
+/* The only conversion between a wheel angle and a param hue, in either direction. Both are
+ * degrees and the mapping is additive, so a wheel turned clockwise raises the hue slider. */
+static float _wheel_to_param_hue(float theta)
+{
+  return fmodf(theta + WHEEL_HUE_ORIGIN, 360.f);
+}
+
+static float _param_to_wheel_hue(float H)
+{
+  return fmodf(H - WHEEL_HUE_ORIGIN + 360.f, 360.f);
+}
+
+/** The profile the wheel's disc must be painted through, or NULL before there is a pipe. */
+static const dt_iop_order_iccprofile_info_t *_wheel_display_profile(dt_iop_module_t *self)
+{
+  return (self->dev && self->dev->preview_pipe) ? dt_ioppr_get_pipe_output_profile_info(self->dev->preview_pipe)
+                                                : NULL;
+}
+
+/** What colour the wheel paints at a position: the disc is a fixed legible ramp, not the param
+ * chroma, which at these soft maxima would render as grey. The rim chroma was searched to fit
+ * the display, so nothing here needs a gamut clamp of its own. */
+static void _wheel_color_fn(float hue_deg, float chroma_frac, float rgb_out[3], gpointer user_data)
+{
+  dt_iop_module_t *self = user_data;
+  dt_iop_colorbalancergb_gui_data_t *g = (dt_iop_colorbalancergb_gui_data_t *)dt_iop_gui_data(self);
+  const dt_iop_order_iccprofile_info_t *profile = _wheel_display_profile(self);
+
+  dt_aligned_pixel_t Ych = { WHEEL_DISC_Y, g->wheel_rim_chroma * chroma_frac,
+                             (float)DEG_TO_RAD(_wheel_to_param_hue(hue_deg)), 0.f };
+  dt_aligned_pixel_t XYZ = { 0.f };
+  dt_aligned_pixel_t RGB = { 0.f };
+  Ych_to_XYZ(Ych, XYZ);
+  dt_colorrings_xyz_d65_to_display_rgb(XYZ, profile, RGB);
+
+  rgb_out[0] = RGB[0];
+  rgb_out[1] = RGB[1];
+  rgb_out[2] = RGB[2];
+}
+
+/** Move a zone's puck to what its params say. Emits nothing (D4), so it is safe from anywhere. */
+static void _wheel_sync_from_params(dt_iop_module_t *self, const dt_cbrgb_wheel_zone_t *zone)
+{
+  dt_iop_colorbalancergb_gui_data_t *g = (dt_iop_colorbalancergb_gui_data_t *)dt_iop_gui_data(self);
+  dt_iop_colorbalancergb_params_t *p = (dt_iop_colorbalancergb_params_t *)self->params;
+  GtkWidget *wheel = _zone_widget(g, zone->off_wheel);
+  if(IS_NULL_PTR(wheel)) return;
+
+  dt_color_wheel_set_hue_chroma(DT_COLOR_WHEEL(wheel), _param_to_wheel_hue(*_zone_param(p, zone->off_H)),
+                               CLAMPS(*_zone_param(p, zone->off_C) / zone->soft_max_C, 0.f, 1.f));
+}
+
+static void _wheel_value_changed(GtkWidget *wheel, gpointer user_data)
+{
+  dt_cbrgb_wheel_binding_t *b = user_data;
+  dt_iop_module_t *self = b->self;
+  const dt_cbrgb_wheel_zone_t *zone = b->zone;
+
+  if(dt_gui_widgets_suppressed()) return;
+
+  dt_iop_colorbalancergb_gui_data_t *g = (dt_iop_colorbalancergb_gui_data_t *)dt_iop_gui_data(self);
+  dt_iop_colorbalancergb_params_t *p = (dt_iop_colorbalancergb_params_t *)self->params;
+
+  const float H = _wheel_to_param_hue(dt_color_wheel_get_hue(DT_COLOR_WHEEL(wheel)));
+  const float C = dt_color_wheel_get_chroma(DT_COLOR_WHEEL(wheel)) * zone->soft_max_C;
+  *_zone_param(p, zone->off_H) = H;
+  *_zone_param(p, zone->off_C) = C;
+
+  dt_iop_color_picker_reset(self, TRUE);
+
+  dt_gui_freeze_begin();
+  dt_bauhaus_slider_set(_zone_widget(g, zone->off_slider_H), H);
+  dt_bauhaus_slider_set(_zone_widget(g, zone->off_slider_C), C);
+  dt_gui_freeze_end();
+
+  // The zone's H slider, not the wheel: that is what repaints the zone's chroma-slider gradient
+  // for the new hue, and its own wheel push is an idempotent re-set from the params just written.
+  gui_changed(self, _zone_widget(g, zone->off_slider_H), NULL);
+
+  dt_dev_add_history_item(self->dev, self, TRUE, TRUE);
+}
+
+/** The display profile can change under us (a window moved to another monitor, a new monitor
+ * profile picked), and the disc's colours are a function of it. User handlers on "draw" run
+ * before the class handler, so a rebuild asked for here lands in the same frame. */
+static gboolean _wheel_draw_profile_hook(GtkWidget *wheel, cairo_t *cr, gpointer user_data)
+{
+  dt_cbrgb_wheel_binding_t *b = user_data;
+  dt_iop_colorbalancergb_gui_data_t *g = (dt_iop_colorbalancergb_gui_data_t *)dt_iop_gui_data(b->self);
+  const dt_iop_order_iccprofile_info_t *profile = _wheel_display_profile(b->self);
+
+  if(profile != g->wheel_profile)
+  {
+    g->wheel_profile = profile;
+    g->wheel_rim_chroma = dt_colorrings_ych_display_rim_chroma(WHEEL_DISC_Y, WHEEL_DISC_MAX_C, profile);
+    dt_color_wheel_invalidate_background(DT_COLOR_WHEEL(wheel));
+  }
+  return FALSE;
+}
 
 
 typedef struct dt_iop_colorbalancergb_data_t
@@ -1709,6 +1873,9 @@ void gui_changed(dt_iop_module_t *self, GtkWidget *w, void *previous)
   if(IS_NULL_PTR(w) || w == g->shadows_H)
     paint_chroma_slider(g->shadows_C, p->shadows_H);
 
+  if(IS_NULL_PTR(w) || w == g->shadows_H || w == g->shadows_C)
+    _wheel_sync_from_params(self, &_wheel_zone_shadows);
+
   if(IS_NULL_PTR(w) || w == g->midtones_H)
     paint_chroma_slider(g->midtones_C, p->midtones_H);
 
@@ -1907,12 +2074,29 @@ void gui_init(dt_iop_module_t *self)
   gtk_widget_set_tooltip_text(g->global_H, _("hue of the global color offset"));
 
   g->global_C = dt_bauhaus_slider_from_params(self, "global_C");
-  dt_bauhaus_slider_set_soft_range(g->global_C, 0., 0.0075);
+  dt_bauhaus_slider_set_soft_range(g->global_C, 0., CBRGB_SOFT_MAX_C_GLOBAL);
   dt_bauhaus_slider_set_digits(g->global_C, 4);
   dt_bauhaus_slider_set_format(g->global_C, "%");
   gtk_widget_set_tooltip_text(g->global_C, _("chroma of the global color offset"));
 
   gtk_box_pack_start(GTK_BOX(self->gui->widget), dt_ui_section_label_new(_("shadows lift")), FALSE, FALSE, 0);
+
+  g->shadows_binding = (dt_cbrgb_wheel_binding_t){ self, &_wheel_zone_shadows };
+  // Seed both so the first draw paints a valid rim before the profile hook has run; the hook's
+  // pointer compare then finds them equal and does nothing.
+  g->wheel_profile = _wheel_display_profile(self);
+  g->wheel_rim_chroma = dt_colorrings_ych_display_rim_chroma(WHEEL_DISC_Y, WHEEL_DISC_MAX_C, g->wheel_profile);
+  g->shadows_wheel = dt_color_wheel_new(_wheel_color_fn, self);
+  gtk_widget_set_hexpand(g->shadows_wheel, FALSE);
+  gtk_widget_set_halign(g->shadows_wheel, GTK_ALIGN_CENTER);
+  // The base class makes height follow width; without this the wheel is as wide as the panel.
+  gtk_widget_set_size_request(g->shadows_wheel, DT_PIXEL_APPLY_DPI(160), DT_PIXEL_APPLY_DPI(160));
+  gtk_widget_set_tooltip_text(g->shadows_wheel, _("drag the puck to set the shadows hue and chroma\n"
+                                                  "the outer ring changes the hue alone"));
+  g_signal_connect(G_OBJECT(g->shadows_wheel), "value-changed", G_CALLBACK(_wheel_value_changed),
+                   &g->shadows_binding);
+  g_signal_connect(G_OBJECT(g->shadows_wheel), "draw", G_CALLBACK(_wheel_draw_profile_hook), &g->shadows_binding);
+  gtk_box_pack_start(GTK_BOX(self->gui->widget), g->shadows_wheel, FALSE, FALSE, 0);
 
   g->shadows_Y = dt_bauhaus_slider_from_params(self, "shadows_Y");
   dt_bauhaus_slider_set_soft_range(g->shadows_Y, -1.0, 1.0);
@@ -1926,7 +2110,7 @@ void gui_init(dt_iop_module_t *self)
   gtk_widget_set_tooltip_text(g->shadows_H, _("hue of the color gain in shadows"));
 
   g->shadows_C = dt_bauhaus_slider_from_params(self, "shadows_C");
-  dt_bauhaus_slider_set_soft_range(g->shadows_C, 0., 0.375);
+  dt_bauhaus_slider_set_soft_range(g->shadows_C, 0., CBRGB_SOFT_MAX_C_SHADOWS);
   dt_bauhaus_slider_set_digits(g->shadows_C, 4);
   dt_bauhaus_slider_set_format(g->shadows_C, "%");
   gtk_widget_set_tooltip_text(g->shadows_C, _("chroma of the color gain in shadows"));
@@ -1945,7 +2129,7 @@ void gui_init(dt_iop_module_t *self)
   gtk_widget_set_tooltip_text(g->highlights_H, _("hue of the color gain in highlights"));
 
   g->highlights_C = dt_bauhaus_slider_from_params(self, "highlights_C");
-  dt_bauhaus_slider_set_soft_range(g->highlights_C, 0., 0.15);
+  dt_bauhaus_slider_set_soft_range(g->highlights_C, 0., CBRGB_SOFT_MAX_C_HIGHLIGHTS);
   dt_bauhaus_slider_set_digits(g->highlights_C, 4);
   dt_bauhaus_slider_set_format(g->highlights_C, "%");
   gtk_widget_set_tooltip_text(g->highlights_C, _("chroma of the color gain in highlights"));
@@ -1964,7 +2148,7 @@ void gui_init(dt_iop_module_t *self)
   gtk_widget_set_tooltip_text(g->midtones_H, _("hue of the color exponent in mid-tones"));
 
   g->midtones_C = dt_bauhaus_slider_from_params(self, "midtones_C");
-  dt_bauhaus_slider_set_soft_range(g->midtones_C, 0., 0.075);
+  dt_bauhaus_slider_set_soft_range(g->midtones_C, 0., CBRGB_SOFT_MAX_C_MIDTONES);
   dt_bauhaus_slider_set_digits(g->midtones_C, 4);
   dt_bauhaus_slider_set_format(g->midtones_C, "%");
   gtk_widget_set_tooltip_text(g->midtones_C, _("chroma of the color exponent in mid-tones"));

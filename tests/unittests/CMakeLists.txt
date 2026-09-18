@@ -43,6 +43,7 @@ set(LIB_ANSEL_UNIT_TESTS
   test_masks_raster_contract
   test_stroke_raster
   test_colorwheel
+  test_colorrings_display
 )
 
 foreach(test ${LIB_ANSEL_UNIT_TESTS})
