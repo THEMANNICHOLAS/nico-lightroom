@@ -45,6 +45,7 @@
 #include "common/module_versioning.h"
 #include "develop/iop_order.h"
 #include "control/control.h"
+#include "control/signal.h"
 #include "develop/develop.h"
 #include "develop/dev_history.h"
 #include "develop/dev_snapshot.h"
@@ -117,6 +118,7 @@ static void _lib_snapshots_toggled_callback(GtkToggleButton *widget, gpointer us
 static void _lib_snapshots_delete_button_clicked_callback(GtkWidget *widget, gpointer user_data);
 static void _before_after_toggled(GtkToggleButton *button, gpointer user_data);
 static gboolean _before_after_add_button_idle(gpointer user_data);
+static void _before_after_image_changed(gpointer instance, dt_lib_module_t *self);
 
 // Reset the value fields to "empty" without releasing the snapshot engine or touching GTK
 // widgets. Used when a snapshot's engine is being handed off to another slot (compacting the
@@ -529,6 +531,17 @@ int mouse_moved(dt_lib_module_t *self, double x, double y, double pressure, int 
   return 0;
 }
 
+// Leaving the darkroom drops the before and returns the toggle to "after", exactly like an image
+// change. The user snapshot slots are deliberately left alone.
+void view_leave(struct dt_lib_module_t *self, struct dt_view_t *old_view, struct dt_view_t *new_view)
+{
+  dt_lib_snapshots_t *d = (dt_lib_snapshots_t *)self->data;
+  if(IS_NULL_PTR(d) || IS_NULL_PTR(d->before_after_button)) return;
+
+  gtk_toggle_button_set_active(GTK_TOGGLE_BUTTON(d->before_after_button), FALSE);
+  dt_dev_snapshot_clear(&d->before.snap);
+}
+
 void gui_reset(dt_lib_module_t *self)
 {
   dt_lib_snapshots_t *d = (dt_lib_snapshots_t *)self->data;
@@ -543,6 +556,10 @@ void gui_reset(dt_lib_module_t *self)
     gtk_widget_hide(d->snapshot[k].row);
     gtk_toggle_button_set_active(GTK_TOGGLE_BUTTON(d->snapshot[k].button), FALSE);
   }
+
+  /* also leave the before/after view */
+  gtk_toggle_button_set_active(GTK_TOGGLE_BUTTON(d->before_after_button), FALSE);
+  dt_dev_snapshot_clear(&d->before.snap);
 
   dt_control_queue_redraw_center();
 }
@@ -625,6 +642,11 @@ void gui_init(dt_lib_module_t *self)
   g_object_ref_sink(d->before_after_button);
   g_signal_connect(G_OBJECT(d->before_after_button), "toggled", G_CALLBACK(_before_after_toggled), self);
   d->before_after_idle = g_idle_add((GSourceFunc)_before_after_add_button_idle, d);
+
+  /* Image change is the boundary for the hidden before: a switch to another image must not leave
+   * the previous image's before on screen. view_leave() and gui_reset() clear it too. */
+  DT_DEBUG_CONTROL_SIGNAL_CONNECT(dt_control_signal_get_global(), DT_SIGNAL_DEVELOP_IMAGE_CHANGED,
+                                  G_CALLBACK(_before_after_image_changed), self);
 }
 
 void gui_cleanup(dt_lib_module_t *self)
@@ -632,6 +654,8 @@ void gui_cleanup(dt_lib_module_t *self)
   if(IS_NULL_PTR(self->data)) return;
   dt_lib_snapshots_t *d = (dt_lib_snapshots_t *)self->data;
 
+  DT_DEBUG_CONTROL_SIGNAL_DISCONNECT(dt_control_signal_get_global(),
+                                     G_CALLBACK(_before_after_image_changed), self);
   for(uint32_t k = 0; k < d->size; k++) _lib_snapshot_clear_state(d->snapshot + k);
   if(d->before_after_idle)
   {
@@ -647,6 +671,18 @@ void gui_cleanup(dt_lib_module_t *self)
   dt_free(d->snapshot);
 
   dt_free(self->data);
+}
+
+// DEVELOP_IMAGE_CHANGED handler (GUI thread, asynchronous signal). Un-press first so the toggled
+// handler redraws the live edit before the before engine is released, then drop the frozen before
+// so the next toggle recaptures for the new image. Touches no user snapshot slot.
+static void _before_after_image_changed(gpointer instance, dt_lib_module_t *self)
+{
+  dt_lib_snapshots_t *d = (dt_lib_snapshots_t *)self->data;
+  if(IS_NULL_PTR(d) || IS_NULL_PTR(d->before_after_button)) return;
+
+  gtk_toggle_button_set_active(GTK_TOGGLE_BUTTON(d->before_after_button), FALSE);
+  dt_dev_snapshot_clear(&d->before.snap);
 }
 
 // Toolbox toggle handler. Capture is blocking and must never run from a draw handler, so it happens
