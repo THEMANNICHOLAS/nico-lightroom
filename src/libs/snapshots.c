@@ -52,6 +52,7 @@
 #include "widgets/paint.h"
 
 #include "gui/color_picker_proxy.h"
+#include "widgets/accelerators.h"
 #include "widgets/draw.h"
 #include "widgets/togglebutton.h"
 #include "libs/lib.h"
@@ -119,6 +120,8 @@ static void _lib_snapshots_delete_button_clicked_callback(GtkWidget *widget, gpo
 static void _before_after_toggled(GtkToggleButton *button, gpointer user_data);
 static gboolean _before_after_add_button_idle(gpointer user_data);
 static void _before_after_image_changed(gpointer instance, dt_lib_module_t *self);
+static gboolean _before_after_accel(GtkAccelGroup *accel_group, GObject *accelerable, guint keyval,
+                                    GdkModifierType modifier, gpointer data);
 
 // Reset the value fields to "empty" without releasing the snapshot engine or touching GTK
 // widgets. Used when a snapshot's engine is being handed off to another slot (compacting the
@@ -647,6 +650,13 @@ void gui_init(dt_lib_module_t *self)
    * the previous image's before on screen. view_leave() and gui_reset() clear it too. */
   DT_DEBUG_CONTROL_SIGNAL_CONNECT(dt_control_signal_get_global(), DT_SIGNAL_DEVELOP_IMAGE_CHANGED,
                                   G_CALLBACK(_before_after_image_changed), self);
+
+  /* Darkroom shortcut, rebindable in the shortcuts panel. The action name is the persisted accel
+   * path component and must contain no slash. */
+  dt_accels_new_action_shortcut(dt_accels_get_global(), _before_after_accel, self, NULL,
+                                dt_accels_get_global()->darkroom_accels, N_("Darkroom/Toolbox"),
+                                N_("Before and after"), GDK_KEY_backslash, 0, FALSE,
+                                _("Toggle between the edited image and the original"));
 }
 
 void gui_cleanup(dt_lib_module_t *self)
@@ -683,6 +693,20 @@ static void _before_after_image_changed(gpointer instance, dt_lib_module_t *self
 
   gtk_toggle_button_set_active(GTK_TOGGLE_BUTTON(d->before_after_button), FALSE);
   dt_dev_snapshot_clear(&d->before.snap);
+}
+
+// Accelerator adapter. The dispatcher's callback signature is not gtk_button_clicked()'s, so this
+// is the required signature adapter, not a wrapper (see dev_toolbox.c's
+// dt_dev_toolbox_activate_accel): it forwards to the button so the keyboard path reuses the exact
+// same toggled handler as the pointer path.
+static gboolean _before_after_accel(GtkAccelGroup *accel_group, GObject *accelerable, guint keyval,
+                                    GdkModifierType modifier, gpointer data)
+{
+  dt_lib_module_t *self = (dt_lib_module_t *)data;
+  dt_lib_snapshots_t *d = (dt_lib_snapshots_t *)self->data;
+
+  gtk_button_clicked(GTK_BUTTON(d->before_after_button));
+  return TRUE;
 }
 
 // Toolbox toggle handler. Capture is blocking and must never run from a draw handler, so it happens
