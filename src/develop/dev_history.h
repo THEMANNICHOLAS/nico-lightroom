@@ -739,6 +739,33 @@ gboolean dt_dev_transient_params_active(struct dt_develop_t *dev, const struct d
  *  dt_iop_get_module() -- neither of which layer 1 can see. */
 GList *dt_history_duplicate(GList *hist);
 
+/**
+ * @brief Filter a duplicated history down to the geometry items a "before" keeps.
+ *
+ * Takes ownership of @p history (the caller's duplicate of the live list). Keeps only items
+ * whose index is below @p history_end AND whose module carries the OPTIONAL `geometry_record`
+ * hook -- the codebase's runtime "this module moves pixels" marker, NULL for every other module
+ * (see iop/iop_api.h). Geometry items at or past @p history_end belong to the undone/redo tail
+ * (the cursor only moves; the list is never truncated until a new commit), so they are dropped:
+ * the "before" must frame the edit the pipe is actually rendering, not a reverted one.
+ *
+ * One pass builds the kept and the discarded lists, so the count and the kept set cannot drift.
+ * The kept items are returned in the SAME list order as the input, as a NEW GList of the same
+ * item pointers (no extra reference taken); @p out_end receives their count. When nothing is
+ * kept, @p history is returned UNCHANGED with @p out_end = 0, so the engine renders the full
+ * duplicate at end 0 (a NULL history would make it render the on-disk edit instead).
+ *
+ * The caller must not free @p history afterwards; free the returned list with
+ * g_list_free_full(..., dt_dev_free_history_item) or hand it to dt_dev_snapshot_capture(),
+ * which takes ownership.
+ *
+ * @param history Duplicated history list; consumed by this call.
+ * @param history_end Live history end (dt_dev_get_history_end_ext()); items at or past it drop.
+ * @param out_end Receives the kept-item count (required, non-NULL).
+ * @return The filtered list, or @p history unchanged when nothing is kept.
+ */
+GList *dt_history_filter_geometry(GList *history, int32_t history_end, int32_t *out_end);
+
 #ifdef __cplusplus
 }
 #endif

@@ -51,6 +51,7 @@ set(LIB_ANSEL_UNIT_TESTS
   test_conf_value_lifetime
   test_dtpthread_recursive
   test_history_snapshot
+  test_history_geometry_filter
   test_masks_raster_contract
   test_stroke_raster
   test_paint_module_switch
