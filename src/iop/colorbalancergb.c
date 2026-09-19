@@ -183,6 +183,15 @@ typedef struct
   const dt_cbrgb_wheel_zone_t *zone;
 } dt_cbrgb_wheel_binding_t;
 
+typedef enum
+{
+  CBRGB_WHEEL_GLOBAL = 0,
+  CBRGB_WHEEL_SHADOWS,
+  CBRGB_WHEEL_HIGHLIGHTS,
+  CBRGB_WHEEL_MIDTONES,
+  CBRGB_WHEEL_ZONES
+} dt_cbrgb_wheel_zone_id_t;
+
 typedef struct dt_iop_colorbalancergb_gui_data_t
 {
   GtkWidget *shadows_H, *midtones_H, *highlights_H, *global_H;
@@ -199,30 +208,53 @@ typedef struct dt_iop_colorbalancergb_gui_data_t
   GtkNotebook *notebook;
   gboolean mask_display;
   dt_iop_colorbalancergb_mask_data_t mask_type;
-  GtkWidget *shadows_wheel;
-  dt_cbrgb_wheel_binding_t shadows_binding;
+  GtkWidget *global_wheel, *shadows_wheel, *highlights_wheel, *midtones_wheel;
+  dt_cbrgb_wheel_binding_t wheel_bindings[CBRGB_WHEEL_ZONES];
   // The display profile the wheel rasters were last painted for, compared as a pointer and never
   // dereferenced, and the rim chroma searched for it.
   const dt_iop_order_iccprofile_info_t *wheel_profile;
   float wheel_rim_chroma;
 } dt_iop_colorbalancergb_gui_data_t;
 
-static const dt_cbrgb_wheel_zone_t _wheel_zone_shadows
-    = { N_("shadows"), CBRGB_SOFT_MAX_C_SHADOWS,
-        offsetof(dt_iop_colorbalancergb_params_t, shadows_H),
-        offsetof(dt_iop_colorbalancergb_params_t, shadows_C),
-        offsetof(dt_iop_colorbalancergb_gui_data_t, shadows_H),
-        offsetof(dt_iop_colorbalancergb_gui_data_t, shadows_C),
-        offsetof(dt_iop_colorbalancergb_gui_data_t, shadows_wheel) };
+static const dt_cbrgb_wheel_zone_t _wheel_zones[CBRGB_WHEEL_ZONES]
+    = { [CBRGB_WHEEL_GLOBAL] = { N_("global"), CBRGB_SOFT_MAX_C_GLOBAL,
+                                  offsetof(dt_iop_colorbalancergb_params_t, global_H),
+                                  offsetof(dt_iop_colorbalancergb_params_t, global_C),
+                                  offsetof(dt_iop_colorbalancergb_gui_data_t, global_H),
+                                  offsetof(dt_iop_colorbalancergb_gui_data_t, global_C),
+                                  offsetof(dt_iop_colorbalancergb_gui_data_t, global_wheel) },
+        [CBRGB_WHEEL_SHADOWS] = { N_("shadows"), CBRGB_SOFT_MAX_C_SHADOWS,
+                                   offsetof(dt_iop_colorbalancergb_params_t, shadows_H),
+                                   offsetof(dt_iop_colorbalancergb_params_t, shadows_C),
+                                   offsetof(dt_iop_colorbalancergb_gui_data_t, shadows_H),
+                                   offsetof(dt_iop_colorbalancergb_gui_data_t, shadows_C),
+                                   offsetof(dt_iop_colorbalancergb_gui_data_t, shadows_wheel) },
+        [CBRGB_WHEEL_HIGHLIGHTS] = { N_("highlights"), CBRGB_SOFT_MAX_C_HIGHLIGHTS,
+                                      offsetof(dt_iop_colorbalancergb_params_t, highlights_H),
+                                      offsetof(dt_iop_colorbalancergb_params_t, highlights_C),
+                                      offsetof(dt_iop_colorbalancergb_gui_data_t, highlights_H),
+                                      offsetof(dt_iop_colorbalancergb_gui_data_t, highlights_C),
+                                      offsetof(dt_iop_colorbalancergb_gui_data_t, highlights_wheel) },
+        [CBRGB_WHEEL_MIDTONES] = { N_("mid-tones"), CBRGB_SOFT_MAX_C_MIDTONES,
+                                    offsetof(dt_iop_colorbalancergb_params_t, midtones_H),
+                                    offsetof(dt_iop_colorbalancergb_params_t, midtones_C),
+                                    offsetof(dt_iop_colorbalancergb_gui_data_t, midtones_H),
+                                    offsetof(dt_iop_colorbalancergb_gui_data_t, midtones_C),
+                                    offsetof(dt_iop_colorbalancergb_gui_data_t, midtones_wheel) } };
 
 static float *_zone_param(dt_iop_colorbalancergb_params_t *p, size_t off)
 {
   return (float *)((char *)p + off);
 }
 
+static GtkWidget **_zone_widget_slot(dt_iop_colorbalancergb_gui_data_t *g, size_t off)
+{
+  return (GtkWidget **)((char *)g + off);
+}
+
 static GtkWidget *_zone_widget(dt_iop_colorbalancergb_gui_data_t *g, size_t off)
 {
-  return *(GtkWidget **)((char *)g + off);
+  return *_zone_widget_slot(g, off);
 }
 
 /* The only conversion between a wheel angle and a param hue, in either direction. Both are
@@ -289,9 +321,21 @@ static void _wheel_value_changed(GtkWidget *wheel, gpointer user_data)
   dt_iop_colorbalancergb_params_t *p = (dt_iop_colorbalancergb_params_t *)self->params;
 
   const float H = _wheel_to_param_hue(dt_color_wheel_get_hue(DT_COLOR_WHEEL(wheel)));
-  const float C = dt_color_wheel_get_chroma(DT_COLOR_WHEEL(wheel)) * zone->soft_max_C;
+  const float chroma_frac = dt_color_wheel_get_chroma(DT_COLOR_WHEEL(wheel));
+  float *param_C = _zone_param(p, zone->off_C);
+
+  // The puck pins at the rim for every chroma at or above the zone's soft maximum, so a rim
+  // reading cannot tell "the user asked for the maximum" apart from "the value was already past
+  // it" -- and the params run to 1.0 while global's soft maximum stops at 0.0075, which the
+  // colour picker overshoots routinely. Since the widget emits on ANY press, including one that
+  // moved nothing and one on the hue ring (which must change the hue alone), writing
+  // rim * soft_max here would silently collapse such a chroma. At the rim it is left alone;
+  // dragging inward reports < 1, so the puck can still reduce an out-of-range value.
+  const gboolean pinned_at_rim = (chroma_frac >= 1.f) && (*param_C > zone->soft_max_C);
+  const float C = pinned_at_rim ? *param_C : chroma_frac * zone->soft_max_C;
+
   *_zone_param(p, zone->off_H) = H;
-  *_zone_param(p, zone->off_C) = C;
+  *param_C = C;
 
   dt_iop_color_picker_reset(self, TRUE);
 
@@ -312,15 +356,22 @@ static void _wheel_value_changed(GtkWidget *wheel, gpointer user_data)
  * before the class handler, so a rebuild asked for here lands in the same frame. */
 static gboolean _wheel_draw_profile_hook(GtkWidget *wheel, cairo_t *cr, gpointer user_data)
 {
-  dt_cbrgb_wheel_binding_t *b = user_data;
-  dt_iop_colorbalancergb_gui_data_t *g = (dt_iop_colorbalancergb_gui_data_t *)dt_iop_gui_data(b->self);
-  const dt_iop_order_iccprofile_info_t *profile = _wheel_display_profile(b->self);
+  dt_iop_module_t *self = user_data;
+  dt_iop_colorbalancergb_gui_data_t *g = (dt_iop_colorbalancergb_gui_data_t *)dt_iop_gui_data(self);
+  const dt_iop_order_iccprofile_info_t *profile = _wheel_display_profile(self);
 
   if(profile != g->wheel_profile)
   {
     g->wheel_profile = profile;
     g->wheel_rim_chroma = dt_colorrings_ych_display_rim_chroma(WHEEL_DISC_Y, WHEEL_DISC_MAX_C, profile);
-    dt_color_wheel_invalidate_background(DT_COLOR_WHEEL(wheel));
+    // The rim chroma and the profile are one shared pair for all four discs, so the change
+    // invalidates all of them -- not just the one being drawn, which would leave the other
+    // three painting the old profile's rim until something else resized them.
+    for(int i = 0; i < CBRGB_WHEEL_ZONES; i++)
+    {
+      GtkWidget *w = _zone_widget(g, _wheel_zones[i].off_wheel);
+      if(!IS_NULL_PTR(w)) dt_color_wheel_invalidate_background(DT_COLOR_WHEEL(w));
+    }
   }
   return FALSE;
 }
@@ -1873,14 +1924,21 @@ void gui_changed(dt_iop_module_t *self, GtkWidget *w, void *previous)
   if(IS_NULL_PTR(w) || w == g->shadows_H)
     paint_chroma_slider(g->shadows_C, p->shadows_H);
 
-  if(IS_NULL_PTR(w) || w == g->shadows_H || w == g->shadows_C)
-    _wheel_sync_from_params(self, &_wheel_zone_shadows);
-
   if(IS_NULL_PTR(w) || w == g->midtones_H)
     paint_chroma_slider(g->midtones_C, p->midtones_H);
 
   if(IS_NULL_PTR(w) || w == g->highlights_H)
     paint_chroma_slider(g->highlights_C, p->highlights_H);
+
+  // One arm per zone: a zone's own H or C slider moves its own puck, and w == NULL (gui_update,
+  // presets, undo/redo, reset) moves all four.
+  for(int i = 0; i < CBRGB_WHEEL_ZONES; i++)
+  {
+    const dt_cbrgb_wheel_zone_t *zone = &_wheel_zones[i];
+    if(IS_NULL_PTR(w) || w == _zone_widget(g, zone->off_slider_H)
+       || w == _zone_widget(g, zone->off_slider_C))
+      _wheel_sync_from_params(self, zone);
+  }
 
   if(IS_NULL_PTR(w) || w == g->shadows_weight || w == g->highlights_weight || w == g->mask_grey_fulcrum)
     gtk_widget_queue_draw(GTK_WIDGET(g->area));
@@ -1957,6 +2015,30 @@ static gboolean area_scroll_callback(GtkWidget *widget, GdkEventScroll *event, g
 {
   // let scroll events fall through (e.g. to scroll the panel); the height is set via the grip
   return FALSE;
+}
+
+/** Create one zone's wheel and pack it into the page currently under construction. Every
+ * property here is the shadows wheel's from Phase 2; the only per-zone things are the slot
+ * it lands in, the binding it carries and its tooltip. */
+static void _wheel_add(dt_iop_module_t *self, dt_cbrgb_wheel_zone_id_t id, const char *tooltip)
+{
+  dt_iop_colorbalancergb_gui_data_t *g = (dt_iop_colorbalancergb_gui_data_t *)dt_iop_gui_data(self);
+  const dt_cbrgb_wheel_zone_t *zone = &_wheel_zones[id];
+
+  g->wheel_bindings[id] = (dt_cbrgb_wheel_binding_t){ self, zone };
+
+  GtkWidget *wheel = dt_color_wheel_new(_wheel_color_fn, self);
+  gtk_widget_set_hexpand(wheel, FALSE);
+  gtk_widget_set_halign(wheel, GTK_ALIGN_CENTER);
+  // The base class makes height follow width; without this the wheel is as wide as the panel.
+  gtk_widget_set_size_request(wheel, DT_PIXEL_APPLY_DPI(160), DT_PIXEL_APPLY_DPI(160));
+  gtk_widget_set_tooltip_text(wheel, tooltip);
+  g_signal_connect(G_OBJECT(wheel), "value-changed", G_CALLBACK(_wheel_value_changed),
+                   &g->wheel_bindings[id]);
+  g_signal_connect(G_OBJECT(wheel), "draw", G_CALLBACK(_wheel_draw_profile_hook), self);
+  gtk_box_pack_start(GTK_BOX(self->gui->widget), wheel, FALSE, FALSE, 0);
+
+  *_zone_widget_slot(g, zone->off_wheel) = wheel;
 }
 
 
@@ -2060,7 +2142,15 @@ void gui_init(dt_iop_module_t *self)
   // Page 4-ways
   self->gui->widget = dt_ui_notebook_page(g->notebook, N_("4 ways"), _("selective color grading"));
 
+  // Seed both so the first draw paints a valid rim before the profile hook has run; the hook's
+  // pointer compare then finds them equal and does nothing.
+  g->wheel_profile = _wheel_display_profile(self);
+  g->wheel_rim_chroma = dt_colorrings_ych_display_rim_chroma(WHEEL_DISC_Y, WHEEL_DISC_MAX_C, g->wheel_profile);
+
   gtk_box_pack_start(GTK_BOX(self->gui->widget), dt_ui_section_label_new(_("global offset")), FALSE, FALSE, 0);
+  _wheel_add(self, CBRGB_WHEEL_GLOBAL,
+             _("drag the puck to set the global offset hue and chroma\n"
+               "the outer ring changes the hue alone"));
 
   g->global_Y = dt_bauhaus_slider_from_params(self, "global_Y");
   dt_bauhaus_slider_set_soft_range(g->global_Y, -0.05, 0.05);
@@ -2080,23 +2170,9 @@ void gui_init(dt_iop_module_t *self)
   gtk_widget_set_tooltip_text(g->global_C, _("chroma of the global color offset"));
 
   gtk_box_pack_start(GTK_BOX(self->gui->widget), dt_ui_section_label_new(_("shadows lift")), FALSE, FALSE, 0);
-
-  g->shadows_binding = (dt_cbrgb_wheel_binding_t){ self, &_wheel_zone_shadows };
-  // Seed both so the first draw paints a valid rim before the profile hook has run; the hook's
-  // pointer compare then finds them equal and does nothing.
-  g->wheel_profile = _wheel_display_profile(self);
-  g->wheel_rim_chroma = dt_colorrings_ych_display_rim_chroma(WHEEL_DISC_Y, WHEEL_DISC_MAX_C, g->wheel_profile);
-  g->shadows_wheel = dt_color_wheel_new(_wheel_color_fn, self);
-  gtk_widget_set_hexpand(g->shadows_wheel, FALSE);
-  gtk_widget_set_halign(g->shadows_wheel, GTK_ALIGN_CENTER);
-  // The base class makes height follow width; without this the wheel is as wide as the panel.
-  gtk_widget_set_size_request(g->shadows_wheel, DT_PIXEL_APPLY_DPI(160), DT_PIXEL_APPLY_DPI(160));
-  gtk_widget_set_tooltip_text(g->shadows_wheel, _("drag the puck to set the shadows hue and chroma\n"
-                                                  "the outer ring changes the hue alone"));
-  g_signal_connect(G_OBJECT(g->shadows_wheel), "value-changed", G_CALLBACK(_wheel_value_changed),
-                   &g->shadows_binding);
-  g_signal_connect(G_OBJECT(g->shadows_wheel), "draw", G_CALLBACK(_wheel_draw_profile_hook), &g->shadows_binding);
-  gtk_box_pack_start(GTK_BOX(self->gui->widget), g->shadows_wheel, FALSE, FALSE, 0);
+  _wheel_add(self, CBRGB_WHEEL_SHADOWS,
+             _("drag the puck to set the shadows hue and chroma\n"
+               "the outer ring changes the hue alone"));
 
   g->shadows_Y = dt_bauhaus_slider_from_params(self, "shadows_Y");
   dt_bauhaus_slider_set_soft_range(g->shadows_Y, -1.0, 1.0);
@@ -2116,6 +2192,9 @@ void gui_init(dt_iop_module_t *self)
   gtk_widget_set_tooltip_text(g->shadows_C, _("chroma of the color gain in shadows"));
 
   gtk_box_pack_start(GTK_BOX(self->gui->widget), dt_ui_section_label_new(_("highlights gain")), FALSE, FALSE, 0);
+  _wheel_add(self, CBRGB_WHEEL_HIGHLIGHTS,
+             _("drag the puck to set the highlights hue and chroma\n"
+               "the outer ring changes the hue alone"));
 
   g->highlights_Y = dt_bauhaus_slider_from_params(self, "highlights_Y");
   dt_bauhaus_slider_set_soft_range(g->highlights_Y, -0.5, 0.5);
@@ -2135,6 +2214,9 @@ void gui_init(dt_iop_module_t *self)
   gtk_widget_set_tooltip_text(g->highlights_C, _("chroma of the color gain in highlights"));
 
   gtk_box_pack_start(GTK_BOX(self->gui->widget), dt_ui_section_label_new(_("power")), FALSE, FALSE, 0);
+  _wheel_add(self, CBRGB_WHEEL_MIDTONES,
+             _("drag the puck to set the mid-tones hue and chroma\n"
+               "the outer ring changes the hue alone"));
 
   g->midtones_Y = dt_bauhaus_slider_from_params(self, "midtones_Y");
   dt_bauhaus_slider_set_soft_range(g->midtones_Y, -0.25, 0.25);
