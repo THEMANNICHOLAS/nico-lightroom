@@ -152,8 +152,10 @@ static void _null_upstream_pointer_is_allowed(void **state)
   assert_true(dt_dev_pipe_cache_policy_decide(&in, FALSE, NULL));
 }
 
-int main(void)
+int main(int argc, char **argv)
 {
+  (void)argc;
+  (void)argv;
   const struct CMUnitTest tests[] = {
     cmocka_unit_test(_cpu_only_node_needs_its_input_on_host),
     cmocka_unit_test(_gpu_node_requires_nothing_on_its_own),

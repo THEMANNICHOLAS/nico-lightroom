@@ -145,8 +145,10 @@ static void test_foreach_active_module(void **state)
   assert_string_equal(c.op, "exposure");
 }
 
-int main(void)
+int main(int argc, char **argv)
 {
+  (void)argc;
+  (void)argv;
   const struct CMUnitTest tests[] = {
     cmocka_unit_test(test_module_order_absent_vs_zero),
     cmocka_unit_test(test_history_item_cycle),

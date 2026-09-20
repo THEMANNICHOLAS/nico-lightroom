@@ -55,8 +55,10 @@ static void test_refresh_exposes_new_hierarchical_tag(void **state)
   g_object_unref(store);
 }
 
-int main(void)
+int main(int argc, char **argv)
 {
+  (void)argc;
+  (void)argv;
   const struct CMUnitTest tests[] = {
     cmocka_unit_test(test_refresh_exposes_new_hierarchical_tag),
   };

@@ -157,8 +157,10 @@ static void test_count_distinct_fields(void **state)
   assert_null(dt_image_repository_count_distinct_fields(NULL));
 }
 
-int main(void)
+int main(int argc, char **argv)
 {
+  (void)argc;
+  (void)argv;
   const struct CMUnitTest tests[] = {
     cmocka_unit_test(test_flag_among_multi_image),
     cmocka_unit_test(test_full_paths),

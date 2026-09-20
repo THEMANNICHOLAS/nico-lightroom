@@ -135,8 +135,10 @@ static void test_list_all_carries_the_tree_row(void **state)
   g_list_free_full(rows, dt_preset_row_free);
 }
 
-int main(void)
+int main(int argc, char **argv)
 {
+  (void)argc;
+  (void)argv;
   const struct CMUnitTest tests[] = {
     cmocka_unit_test(test_set_module_version_leaves_params_alone),
     cmocka_unit_test(test_list_for_upgrade_returns_all_versions),

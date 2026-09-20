@@ -335,8 +335,10 @@ static void test_successive_snapshots_do_not_collide(void **state)
   assert_true(_has_flags(imgid, SEEDED_FLAGS));
 }
 
-int main(void)
+int main(int argc, char **argv)
 {
+  (void)argc;
+  (void)argv;
   const struct CMUnitTest tests[] = {
     cmocka_unit_test(test_round_trip_restores_every_table),
     cmocka_unit_test(test_group_leader_restores_membership),

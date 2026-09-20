@@ -128,6 +128,8 @@ void dtgtk_cairo_paint_multiply_small(cairo_t *cr, gint x, gint y, gint w, gint 
 void dtgtk_cairo_paint_treelist(cairo_t *cr, gint x, gint y, gint w, gint h, gint flags, void *data);
 /** Paint an invert icon */
 void dtgtk_cairo_paint_invert(cairo_t *cr, gint x, gint y, gint w, gint h, gint flags, void *data);
+/** Paint a before/after comparison icon: a frame split down the middle, left half filled */
+void dtgtk_cairo_paint_before_after(cairo_t *cr, gint x, gint y, gint w, gint h, gint flags, void *data);
 /** Paint a color rect icon */
 void dtgtk_cairo_paint_color(cairo_t *cr, gint x, gint y, gint w, gint h, gint flags, void *data);
 /** Paint an eye icon */
