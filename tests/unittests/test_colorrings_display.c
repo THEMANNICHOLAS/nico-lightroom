@@ -50,8 +50,10 @@
 /** Mirrors src/iop/colorbalancergb.c: the hue that sits at the wheel's 12 o'clock (D5, and
  * additive -- never a reflection), and the module's own Ych angle offset. */
 // Mirrors WHEEL_DISC_Y / WHEEL_DISC_MAX_C in src/iop/colorbalancergb.c (the disc's Ych reference ramp).
-#define TEST_WHEEL_DISC_Y 0.6f
+#define TEST_WHEEL_DISC_Y 0.5f
 #define TEST_WHEEL_DISC_MAX_C 0.2f
+// Mirrors WHEEL_RIM_HUES in src/iop/colorbalancergb.c.
+#define TEST_RIM_HUES 360
 #define TEST_WHEEL_HUE_ORIGIN 0.f
 #define TEST_CBRGB_ANGLE_SHIFT -30.f
 
@@ -119,7 +121,7 @@ static void _hsb_to_display_rgb_is_unchanged_by_the_refactor(void **state)
   }
 }
 
-/** The disc chain at one uniform chroma: hue, chroma, display profile in, display RGB out. */
+/** The disc chain at one hue and chroma: wheel hue in, display RGB out. */
 static void _disc_rim_rgb(const float wheel_hue, const float chroma, dt_aligned_pixel_t RGB)
 {
   const float param_hue = fmodf(wheel_hue + TEST_WHEEL_HUE_ORIGIN, 360.f);
@@ -130,21 +132,48 @@ static void _disc_rim_rgb(const float wheel_hue, const float chroma, dt_aligned_
   dt_colorrings_xyz_d65_to_display_rgb(XYZ, NULL, RGB);
 }
 
+/** Which entry of the rim table a wheel hue reads, i.e. the Ych hue _disc_rim_rgb() renders at. */
+static int _rim_index_for_wheel_hue(const float wheel_hue)
+{
+  const float param_hue = fmodf(wheel_hue + TEST_WHEEL_HUE_ORIGIN, 360.f);
+  float deg = fmodf(param_hue + TEST_CBRGB_ANGLE_SHIFT, 360.f);
+  if(deg < 0.f) deg += 360.f;
+  return ((int)lroundf(deg)) % TEST_RIM_HUES;
+}
+
 static void _wheel_disc_rim_chroma_fits_the_display_and_keeps_hue_order(void **state)
 {
   (void)state;
 
   const float thetas[6] = { 0.f, 60.f, 120.f, 180.f, 240.f, 300.f };
 
-  // The rim chroma the disc actually paints at: searched down from the slider-stop reference
-  // ramp's 0.2 until every hue fits the display's linear cube.
-  const float C = dt_colorrings_ych_display_rim_chroma(TEST_WHEEL_DISC_Y, TEST_WHEEL_DISC_MAX_C, NULL);
-  if(!(C > 0.05f)) fail_msg("rim chroma %.9g is too low to read as a hue picker", C);
-  if(!(C < TEST_WHEEL_DISC_MAX_C)) fail_msg("rim chroma %.9g: the search never bit, so 0.2 would already fit", C);
+  // One rim chroma per hue, each searched down from the slider-stop reference ramp's 0.2 until
+  // that hue alone fits the display's linear cube.
+  static float rim[TEST_RIM_HUES];
+  dt_colorrings_ych_display_rim_chroma(TEST_WHEEL_DISC_Y, TEST_WHEEL_DISC_MAX_C, NULL, rim, TEST_RIM_HUES);
 
-  // Why the search exists: at the reference ramp's own 0.2, some hues clip a channel to 0 and
-  // paint a flat, hue-shifted arc. The Yrg cone gamut check does not prevent this -- it clips
-  // to the cone, which is far wider than any display.
+  float lowest = rim[0];
+  float highest = rim[0];
+  for(int h = 0; h < TEST_RIM_HUES; h++)
+  {
+    if(!(rim[h] > 0.f)) fail_msg("hue %d: rim chroma %.9g is not usable", h, rim[h]);
+    if(!(rim[h] <= TEST_WHEEL_DISC_MAX_C))
+      fail_msg("hue %d: rim chroma %.9g exceeds the reference ramp's %.9g", h, rim[h], TEST_WHEEL_DISC_MAX_C);
+    lowest = fminf(lowest, rim[h]);
+    highest = fmaxf(highest, rim[h]);
+  }
+
+  // THE regression guard for this table. A single shared chroma -- which is what this was, and
+  // what the sRGB numbers make tempting again -- holds every hue at the most constrained hue's
+  // ceiling and would make this ratio exactly 1. Measured in sRGB at Y = 0.5: 0.0879 at 163 deg
+  // against 0.2 at 89 deg, i.e. 2.28.
+  if(!(highest / lowest >= 2.0f))
+    fail_msg("rim spread %.9g/%.9g = %.3fx: the table is not per-hue, so the disc is washed out",
+             highest, lowest, highest / lowest);
+
+  // Why a search exists at all: at the reference ramp's own 0.2 applied to every hue, some hues
+  // clip a channel to 0 and paint a flat, hue-shifted arc. The Yrg cone gamut check does not
+  // prevent this -- it clips to the cone, which is far wider than any display.
   int clipped_count = 0;
   for(int i = 0; i < 6; i++)
   {
@@ -154,24 +183,24 @@ static void _wheel_disc_rim_chroma_fits_the_display_and_keeps_hue_order(void **s
   }
   assert_true(clipped_count >= 1);
 
-  // At the searched rim, no hue clips and every hue stays bright enough to read.
-  float rim[6][3] = { { 0.f } };
+  // At its own rim every hue still reads as a colour. The min channel is deliberately NOT checked
+  // for clipping here: sitting on the gamut boundary is the point of the per-hue search, and four
+  // of these six hues reach it by driving a channel to exactly 0.
+  float primaries[6][3] = { { 0.f } };
   for(int i = 0; i < 6; i++)
   {
     dt_aligned_pixel_t RGB = { 0.f };
-    _disc_rim_rgb(thetas[i], C, RGB);
-    for(int c = 0; c < 3; c++) rim[i][c] = RGB[c];
+    _disc_rim_rgb(thetas[i], rim[_rim_index_for_wheel_hue(thetas[i])], RGB);
+    for(int c = 0; c < 3; c++) primaries[i][c] = RGB[c];
 
-    const float lo = fminf(RGB[0], fminf(RGB[1], RGB[2]));
     const float hi = fmaxf(RGB[0], fmaxf(RGB[1], RGB[2]));
-    if(!(lo > 0.f)) fail_msg("theta %g at C %.9g: min channel %.9g is clipped at 0", thetas[i], C, lo);
-    if(!(hi >= 0.5f)) fail_msg("theta %g at C %.9g: max channel %.9g is too dark to read", thetas[i], C, hi);
+    if(!(hi >= 0.7f)) fail_msg("theta %g: max channel %.9g is too dark to read", thetas[i], hi);
   }
 
   // The three primaries must sit where the wheel puts them.
-  assert_true(rim[0][0] > rim[0][1] && rim[0][0] > rim[0][2]); // 0 deg is red
-  assert_true(rim[2][1] > rim[2][0] && rim[2][1] > rim[2][2]); // 120 deg is green
-  assert_true(rim[4][2] > rim[4][0] && rim[4][2] > rim[4][1]); // 240 deg is blue
+  assert_true(primaries[0][0] > primaries[0][1] && primaries[0][0] > primaries[0][2]); // 0 deg is red
+  assert_true(primaries[2][1] > primaries[2][0] && primaries[2][1] > primaries[2][2]); // 120 deg is green
+  assert_true(primaries[4][2] > primaries[4][0] && primaries[4][2] > primaries[4][1]); // 240 deg is blue
 }
 
 int main(void)

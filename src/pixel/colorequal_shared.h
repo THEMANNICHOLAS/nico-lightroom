@@ -89,11 +89,15 @@ void dt_colorrings_profile_rgb_to_display_rgb(const dt_aligned_pixel_t RGB,
 void dt_colorrings_xyz_d65_to_display_rgb(const dt_aligned_pixel_t XYZ_D65,
                                           const dt_iop_order_iccprofile_info_t *display_profile,
                                           dt_aligned_pixel_t RGB);
-/* The largest Ych chroma in [0, `max_chroma`] at luminance `Y` whose whole-degree hue sweep stays
- * inside the display profile's linear [0, 1] cube (NULL = sRGB): the constant-chroma rim of a hue
- * disc paints at this chroma without a clipped channel at any hue. */
-float dt_colorrings_ych_display_rim_chroma(const float Y, const float max_chroma,
-                                           const dt_iop_order_iccprofile_info_t *display_profile);
+/* Fill `rim_out[hues]` with, for each hue of an even sweep of the circle, the largest Ych chroma
+ * in [0, `max_chroma`] at luminance `Y` that stays inside the display profile's linear [0, 1] cube
+ * (NULL = sRGB): the rim of a hue disc paints each hue at its OWN entry and so reaches that hue's
+ * gamut boundary. One chroma shared by every hue would instead be the most constrained hue's
+ * ceiling -- at Y = 0.5 in sRGB that is 0.088 against 0.205 available at yellow-green, which is
+ * what makes a uniform disc look washed out. */
+void dt_colorrings_ych_display_rim_chroma(const float Y, const float max_chroma,
+                                          const dt_iop_order_iccprofile_info_t *display_profile,
+                                          float *rim_out, int hues);
 void dt_colorrings_profile_rgb_to_dt_ucs_hsb(const dt_aligned_pixel_t RGB, float white,
                                              const dt_iop_order_iccprofile_info_t *profile,
                                              dt_aligned_pixel_t HSB);

@@ -95,8 +95,11 @@
 // saturated because they max-normalise out of gamut; here the rim is searched DOWN from MAX_C
 // until every hue fits the display profile, and at Y = 0.75 that leaves a rim too pale to read
 // as a hue picker (sRGB: 0.041). Y = 0.6 keeps the rim legible (0.072); do not restore 0.75.
-#define WHEEL_DISC_Y 0.6f
+#define WHEEL_DISC_Y 0.5f
 #define WHEEL_DISC_MAX_C 0.2f
+// One rim chroma per whole degree of hue. The widget samples its own raster on a 360-hue polar
+// LUT, so a finer table would buy nothing it can paint.
+#define WHEEL_RIM_HUES 360
 
 DT_MODULE_INTROSPECTION(5, dt_iop_colorbalancergb_params_t)
 
@@ -213,7 +216,7 @@ typedef struct dt_iop_colorbalancergb_gui_data_t
   // The display profile the wheel rasters were last painted for, compared as a pointer and never
   // dereferenced, and the rim chroma searched for it.
   const dt_iop_order_iccprofile_info_t *wheel_profile;
-  float wheel_rim_chroma;
+  float wheel_rim_chroma[WHEEL_RIM_HUES];
 } dt_iop_colorbalancergb_gui_data_t;
 
 static const dt_cbrgb_wheel_zone_t _wheel_zones[CBRGB_WHEEL_ZONES]
@@ -276,17 +279,32 @@ static const dt_iop_order_iccprofile_info_t *_wheel_display_profile(dt_iop_modul
                                                 : NULL;
 }
 
+/** This hue's rim chroma, interpolated between the two nearest table entries so the disc carries
+ * no step where the table samples. */
+static float _wheel_rim_at(const dt_iop_colorbalancergb_gui_data_t *g, const float hue_rad)
+{
+  const float turns = hue_rad / (2.f * M_PI_F);
+  const float pos = (turns - floorf(turns)) * (float)WHEEL_RIM_HUES;
+  const int i0 = (int)pos % WHEEL_RIM_HUES;
+  const int i1 = (i0 + 1) % WHEEL_RIM_HUES;
+  const float t = pos - floorf(pos);
+  return g->wheel_rim_chroma[i0] * (1.f - t) + g->wheel_rim_chroma[i1] * t;
+}
+
 /** What colour the wheel paints at a position: the disc is a fixed legible ramp, not the param
- * chroma, which at these soft maxima would render as grey. The rim chroma was searched to fit
- * the display, so nothing here needs a gamut clamp of its own. */
+ * chroma, which at these soft maxima would render as grey. Each hue ramps out to ITS OWN searched
+ * rim, so nothing here needs a gamut clamp of its own -- and no hue is held down to the most
+ * constrained hue's ceiling, which is what a single shared rim did. Radius is therefore not
+ * iso-chroma across hues; it never carried that meaning, since the puck's radius is read against
+ * the zone's soft maximum, which is smaller than what the disc paints by 10x and more. */
 static void _wheel_color_fn(float hue_deg, float chroma_frac, float rgb_out[3], gpointer user_data)
 {
   dt_iop_module_t *self = user_data;
   dt_iop_colorbalancergb_gui_data_t *g = (dt_iop_colorbalancergb_gui_data_t *)dt_iop_gui_data(self);
   const dt_iop_order_iccprofile_info_t *profile = _wheel_display_profile(self);
 
-  dt_aligned_pixel_t Ych = { WHEEL_DISC_Y, g->wheel_rim_chroma * chroma_frac,
-                             (float)DEG_TO_RAD(_wheel_to_param_hue(hue_deg)), 0.f };
+  const float hue_rad = (float)DEG_TO_RAD(_wheel_to_param_hue(hue_deg));
+  dt_aligned_pixel_t Ych = { WHEEL_DISC_Y, _wheel_rim_at(g, hue_rad) * chroma_frac, hue_rad, 0.f };
   dt_aligned_pixel_t XYZ = { 0.f };
   dt_aligned_pixel_t RGB = { 0.f };
   Ych_to_XYZ(Ych, XYZ);
@@ -363,7 +381,8 @@ static gboolean _wheel_draw_profile_hook(GtkWidget *wheel, cairo_t *cr, gpointer
   if(profile != g->wheel_profile)
   {
     g->wheel_profile = profile;
-    g->wheel_rim_chroma = dt_colorrings_ych_display_rim_chroma(WHEEL_DISC_Y, WHEEL_DISC_MAX_C, profile);
+    dt_colorrings_ych_display_rim_chroma(WHEEL_DISC_Y, WHEEL_DISC_MAX_C, profile, g->wheel_rim_chroma,
+                                        WHEEL_RIM_HUES);
     // The rim chroma and the profile are one shared pair for all four discs, so the change
     // invalidates all of them -- not just the one being drawn, which would leave the other
     // three painting the old profile's rim until something else resized them.
@@ -2145,7 +2164,8 @@ void gui_init(dt_iop_module_t *self)
   // Seed both so the first draw paints a valid rim before the profile hook has run; the hook's
   // pointer compare then finds them equal and does nothing.
   g->wheel_profile = _wheel_display_profile(self);
-  g->wheel_rim_chroma = dt_colorrings_ych_display_rim_chroma(WHEEL_DISC_Y, WHEEL_DISC_MAX_C, g->wheel_profile);
+  dt_colorrings_ych_display_rim_chroma(WHEEL_DISC_Y, WHEEL_DISC_MAX_C, g->wheel_profile, g->wheel_rim_chroma,
+                                      WHEEL_RIM_HUES);
 
   gtk_box_pack_start(GTK_BOX(self->gui->widget), dt_ui_section_label_new(_("global offset")), FALSE, FALSE, 0);
   _wheel_add(self, CBRGB_WHEEL_GLOBAL,

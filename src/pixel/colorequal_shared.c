@@ -213,32 +213,41 @@ void dt_colorrings_xyz_d65_to_display_rgb(const dt_aligned_pixel_t XYZ_D65,
   for_each_channel(c, aligned(RGB)) RGB[c] = CLAMP(RGB[c], 0.f, 1.f);
 }
 
-float dt_colorrings_ych_display_rim_chroma(const float Y, const float max_chroma,
-                                           const dt_iop_order_iccprofile_info_t *display_profile)
+static gboolean _ych_fits_display_gamut(const float Y, const float chroma, const float hue_rad,
+                                        const dt_iop_order_iccprofile_info_t *display_profile)
 {
-  float low = 0.f;
-  float high = max_chroma;
-  // Same construction as _compute_reference_saturation(): uniform chroma, every hue must fit.
-  for(int iter = 0; iter < 18; iter++)
+  const dt_aligned_pixel_t Ych = { Y, chroma, hue_rad, 0.f };
+  dt_aligned_pixel_t XYZ_D65 = { 0.f };
+  dt_aligned_pixel_t XYZ_D50 = { 0.f };
+  dt_aligned_pixel_t linear_rgb = { 0.f };
+  Ych_to_XYZ(Ych, XYZ_D65);
+  XYZ_D65_to_D50(XYZ_D65, XYZ_D50);
+  _xyz_d50_to_profile_linear_rgb(XYZ_D50, display_profile, linear_rgb);
+  for(int c = 0; c < 3; c++)
+    if(linear_rgb[c] < 0.f || linear_rgb[c] > 1.f) return FALSE;
+  return TRUE;
+}
+
+void dt_colorrings_ych_display_rim_chroma(const float Y, const float max_chroma,
+                                          const dt_iop_order_iccprofile_info_t *display_profile,
+                                          float *const rim_out, const int hues)
+{
+  // One bisection per hue. The whole table costs what the single shared-chroma search cost
+  // before it (that one tested all 360 hues per iteration), so this is not a new expense --
+  // and both are paid once per display-profile change, never per frame.
+  for(int h = 0; h < hues; h++)
   {
-    const float candidate = 0.5f * (low + high);
-    gboolean valid = TRUE;
-    for(int hue = 0; hue < 360 && valid; hue++)
+    const float hue_rad = 2.f * M_PI_F * (float)h / (float)hues;
+    float low = 0.f;
+    float high = max_chroma;
+    for(int iter = 0; iter < 18; iter++)
     {
-      const dt_aligned_pixel_t Ych = { Y, candidate, (float)hue * M_PI_F / 180.f, 0.f };
-      dt_aligned_pixel_t XYZ_D65 = { 0.f };
-      dt_aligned_pixel_t XYZ_D50 = { 0.f };
-      dt_aligned_pixel_t linear_rgb = { 0.f };
-      Ych_to_XYZ(Ych, XYZ_D65);
-      XYZ_D65_to_D50(XYZ_D65, XYZ_D50);
-      _xyz_d50_to_profile_linear_rgb(XYZ_D50, display_profile, linear_rgb);
-      for(int c = 0; c < 3; c++)
-        if(linear_rgb[c] < 0.f || linear_rgb[c] > 1.f) valid = FALSE;
+      const float candidate = 0.5f * (low + high);
+      if(_ych_fits_display_gamut(Y, candidate, hue_rad, display_profile)) low = candidate;
+      else high = candidate;
     }
-    if(valid) low = candidate;
-    else high = candidate;
+    rim_out[h] = low;
   }
-  return low;
 }
 
 void dt_colorrings_hsb_to_display_rgb(const dt_aligned_pixel_t HSB, const float white,
