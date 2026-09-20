@@ -280,8 +280,11 @@ static gboolean _draw(GtkWidget *widget, cairo_t *cr)
   return FALSE;
 }
 
+/* `emit` is FALSE for a drag's motion events: the puck follows the pointer and the owner is told
+ * once, on the press and again on the release, the way a bauhaus slider commits -- an owner that
+ * writes history on every notification would otherwise commit once per motion event. */
 static void _set_from_point(DtColorWheel *self, const dt_color_wheel_geometry_t *g, const float x,
-                            const float y, const dt_color_wheel_drag_t mode)
+                            const float y, const dt_color_wheel_drag_t mode, const gboolean emit)
 {
   const float dx = x - g->cx;
   const float dy = y - g->cy;
@@ -292,7 +295,7 @@ static void _set_from_point(DtColorWheel *self, const dt_color_wheel_geometry_t 
     self->chroma = (g->r_disc > 0.f) ? CLAMPS(r / g->r_disc, 0.f, 1.f) : 0.f;
 
   gtk_widget_queue_draw(GTK_WIDGET(self));
-  g_signal_emit(self, _signals[VALUE_CHANGED], 0);
+  if(emit) g_signal_emit(self, _signals[VALUE_CHANGED], 0);
 }
 
 static gboolean _button_press(GtkWidget *widget, GdkEventButton *event)
@@ -307,7 +310,7 @@ static gboolean _button_press(GtkWidget *widget, GdkEventButton *event)
   self->drag = dt_color_wheel_hit_test(&g, (float)event->x, (float)event->y);
   if(self->drag == DT_COLOR_WHEEL_DRAG_NONE) return FALSE;
 
-  _set_from_point(self, &g, (float)event->x, (float)event->y, self->drag);
+  _set_from_point(self, &g, (float)event->x, (float)event->y, self->drag, TRUE);
   return TRUE;
 }
 
@@ -320,7 +323,7 @@ static gboolean _motion_notify(GtkWidget *widget, GdkEventMotion *event)
   gtk_widget_get_allocation(widget, &alloc);
   const dt_color_wheel_geometry_t g = dt_color_wheel_geometry(alloc.width, alloc.height);
 
-  _set_from_point(self, &g, (float)event->x, (float)event->y, self->drag);
+  _set_from_point(self, &g, (float)event->x, (float)event->y, self->drag, FALSE);
   return TRUE;
 }
 
@@ -330,6 +333,8 @@ static gboolean _button_release(GtkWidget *widget, GdkEventButton *event)
   DtColorWheel *self = DT_COLOR_WHEEL(widget);
   const gboolean was = self->drag != DT_COLOR_WHEEL_DRAG_NONE;
   self->drag = DT_COLOR_WHEEL_DRAG_NONE;
+  /* the motion events said nothing; this is where a drag's final position is announced */
+  if(was) g_signal_emit(self, _signals[VALUE_CHANGED], 0);
   return was;
 }
 

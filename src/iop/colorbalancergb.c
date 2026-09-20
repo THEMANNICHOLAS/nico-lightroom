@@ -92,9 +92,10 @@
 #define WHEEL_HUE_ORIGIN 0.f
 
 // The disc's display ramp. The chroma slider stops use Y = 0.75 and C = 0.2 but only look
-// saturated because they max-normalise out of gamut; here the rim is searched DOWN from MAX_C
-// until every hue fits the display profile, and at Y = 0.75 that leaves a rim too pale to read
-// as a hue picker (sRGB: 0.041). Y = 0.6 keeps the rim legible (0.072); do not restore 0.75.
+// saturated because they max-normalise out of gamut; here each hue's rim is searched DOWN from
+// MAX_C until it fits the display profile, so the disc sits on the gamut boundary. The lower the
+// Y, the more chroma the display affords: at 0.75 the rim is too pale to read as a hue picker,
+// at 0.5 (sRGB) it spans 0.088 at hue 163 to the 0.2 cap around yellow-green. Do not raise it.
 #define WHEEL_DISC_Y 0.5f
 #define WHEEL_DISC_MAX_C 0.2f
 // One rim chroma per whole degree of hue. The widget samples its own raster on a 360-hue polar
@@ -345,8 +346,8 @@ static void _wheel_value_changed(GtkWidget *wheel, gpointer user_data)
   // The puck pins at the rim for every chroma at or above the zone's soft maximum, so a rim
   // reading cannot tell "the user asked for the maximum" apart from "the value was already past
   // it" -- and the params run to 1.0 while global's soft maximum stops at 0.0075, which the
-  // colour picker overshoots routinely. Since the widget emits on ANY press, including one that
-  // moved nothing and one on the hue ring (which must change the hue alone), writing
+  // colour picker overshoots routinely. Since the widget emits on ANY press and release,
+  // including one that moved nothing and one on the hue ring (which must change the hue alone), writing
   // rim * soft_max here would silently collapse such a chroma. At the rim it is left alone;
   // dragging inward reports < 1, so the puck can still reduce an out-of-range value.
   const gboolean pinned_at_rim = (chroma_frac >= 1.f) && (*param_C > zone->soft_max_C);

@@ -98,7 +98,8 @@ cairo_surface_t *dt_color_wheel_raster_build(int width, int height, double ppd,
 GtkWidget *dt_color_wheel_new(dt_color_wheel_color_fn fn, gpointer user_data);
 
 /** Set the puck's position: hue wrapped into [0, 360), chroma clamped to [0, 1]. Redraws and
- * emits NOTHING -- "value-changed" is the user's edits alone. */
+ * emits NOTHING -- "value-changed" is the user's edits alone, and of those only the press and
+ * the release: the puck follows a drag's motion events silently. */
 void dt_color_wheel_set_hue_chroma(DtColorWheel *w, float hue_deg, float chroma_frac);
 
 /** The current hue, in degrees clockwise from 12 o'clock. */

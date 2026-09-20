@@ -253,6 +253,73 @@ static void _setter_emits_nothing_and_getters_wrap_and_clamp(void **state)
   g_object_unref(w);
 }
 
+/* Drive the class handlers with synthetic events: a drag announces itself on the press and on
+ * the release, never per motion event, while the puck still follows every motion. An owner that
+ * commits history on each notification (colorbalancergb does) otherwise commits once per pixel
+ * of the drag, which the bauhaus slider never did. */
+static void _drag_emits_on_press_and_release_only(void **state)
+{
+  (void)state;
+  int calls = 0;
+  GtkWidget *w = dt_color_wheel_new(_encode_fn, &calls);
+  g_object_ref_sink(w);
+
+  // GTK refuses an allocation on a hidden widget, and the handlers read the allocation
+  // directly; shown without a parent it is never realised, so no display work happens.
+  GtkAllocation alloc = { 0, 0, 200, 200 };
+  gtk_widget_show(w);
+  gtk_widget_set_allocation(w, &alloc);
+  GtkAllocation got;
+  gtk_widget_get_allocation(w, &got);
+  assert_int_equal(got.width, 200);
+  const dt_color_wheel_geometry_t g = dt_color_wheel_geometry(alloc.width, alloc.height);
+
+  int emitted = 0;
+  g_signal_connect(G_OBJECT(w), "value-changed", G_CALLBACK(_count), &emitted);
+  GtkWidgetClass *klass = GTK_WIDGET_GET_CLASS(w);
+
+  GdkEventButton press = { 0 };
+  press.type = GDK_BUTTON_PRESS;
+  press.button = 1;
+  press.x = g.cx + 0.25 * g.r_disc;
+  press.y = g.cy;
+  assert_true(klass->button_press_event(w, &press));
+  assert_int_equal(emitted, 1);
+  assert_true(fabsf(dt_color_wheel_get_chroma(DT_COLOR_WHEEL(w)) - 0.25f) < 1e-2f);
+
+  const float fracs[] = { 0.4f, 0.6f, 0.8f };
+  for(size_t i = 0; i < sizeof(fracs) / sizeof(fracs[0]); i++)
+  {
+    GdkEventMotion motion = { 0 };
+    motion.type = GDK_MOTION_NOTIFY;
+    motion.x = g.cx + fracs[i] * g.r_disc;
+    motion.y = g.cy;
+    assert_true(klass->motion_notify_event(w, &motion));
+    // the puck follows, silently
+    assert_true(fabsf(dt_color_wheel_get_chroma(DT_COLOR_WHEEL(w)) - fracs[i]) < 1e-2f);
+    assert_int_equal(emitted, 1);
+  }
+
+  GdkEventButton release = { 0 };
+  release.type = GDK_BUTTON_RELEASE;
+  release.button = 1;
+  assert_true(klass->button_release_event(w, &release));
+  assert_int_equal(emitted, 2);
+  assert_true(fabsf(dt_color_wheel_get_hue(DT_COLOR_WHEEL(w)) - 90.f) < 1e-3f);
+
+  // a motion with no button down is not a drag and says nothing
+  GdkEventMotion stray = { 0 };
+  stray.type = GDK_MOTION_NOTIFY;
+  stray.x = g.cx;
+  stray.y = g.cy - 0.5 * g.r_disc;
+  assert_false(klass->motion_notify_event(w, &stray));
+  assert_int_equal(emitted, 2);
+  assert_true(fabsf(dt_color_wheel_get_chroma(DT_COLOR_WHEEL(w)) - 0.8f) < 1e-2f);
+
+  gtk_widget_destroy(w);
+  g_object_unref(w);
+}
+
 int main(int argc, char **argv)
 {
   const struct CMUnitTest pure[] = {
@@ -274,6 +341,7 @@ int main(int argc, char **argv)
 
   const struct CMUnitTest widget[] = {
     cmocka_unit_test(_setter_emits_nothing_and_getters_wrap_and_clamp),
+    cmocka_unit_test(_drag_emits_on_press_and_release_only),
   };
   return cmocka_run_group_tests_name("colorwheel-widget", widget, NULL, NULL);
 }
