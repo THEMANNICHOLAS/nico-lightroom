@@ -1895,6 +1895,41 @@ That check is what makes the geometry an invariant of `g->thumb_preview_entry` /
 without re-deriving it. Any new GUI reader of a cacheline resolved by hash owes the same check:
 the hash identifies the content, never the size.
 
+### colorbalancergb: the colour wheel's hue seam, its colours, and its one history commit
+
+`src/widgets/colorwheel.c` measures hue clockwise from 12 o'clock and knows no param
+convention. The IOP owns the seam as one additive pair, `_wheel_to_param_hue()` /
+`_param_to_wheel_hue()` over the `WHEEL_HUE_ORIGIN` define (`src/iop/colorbalancergb.c`), and
+the disc's colour callback and the drag handler both go through it -- which is what makes the
+colour under the puck equal the hue the param applies, by construction rather than by
+calibration. Inline a second copy of either formula and the puck sits over a colour it does not
+apply, with nothing failing loudly; a second consumer writes its own pair and leaves the widget
+alone, and `WHEEL_HUE_ORIGIN` chooses which hue sits at 12 o'clock, never the direction.
+
+**A widget takes its colours from a caller-supplied callback, never from a profile.** Every CI
+gate passes on a `src/widgets/` file that includes `pixel/` or `colorprofiles/` -- `widgets/` is
+layer 2.5 in `tools/include_graph.py`, above both -- so green gates are NOT permission here. The
+rule is `src/widgets/README.md`'s GTK/cairo/glib-only one, and the concrete cost is that
+`colorprofiles/iop_profile.h` drags `common/colorspaces_inline_conversions.h` and `<CL/cl.h>`
+into the widget layer. Colour management stays in the IOP, which samples the callback onto a
+coarse polar LUT rather than per pixel.
+
+**A handler that sets sliders under freeze must write the params by hand first, and must call
+the module's own `gui_changed()`.** `dt_bauhaus_slider_set()` under
+`dt_gui_freeze_begin()`/`_end()` does not write params -- `_commit_slider_value()` returns early
+on `dt_gui_widgets_suppressed()` -- so a handler that skips the `p->*_H = ...; p->*_C = ...;`
+assignments commits the old values while the sliders show the new ones. The framework's
+`dt_iop_gui_changed()` commits history itself, so calling it and then
+`dt_dev_add_history_item()` double-commits every drag; the module's own non-committing
+`gui_changed()` is the one to call before that single commit. Open every such handler with
+`if(dt_gui_widgets_suppressed()) return;`, because the framework freezes `gui_update` and
+`gui_changed()` freezes again, so a setter-driven re-entry must be ignored rather than
+committed. That guard cannot cover a genuinely UNFROZEN path, and one exists:
+`_iop_reset_label_reset` (`src/develop/imageop_gui.c`) calls `module->gui_update()` with no
+freeze at all, so suppression reads FALSE there. What protects the wheel is that
+`dt_color_wheel_set_hue_chroma()` emits nothing -- a widget whose programmatic setter DID emit
+would commit a reset as if it were a user edit. None of these three fails loudly.
+
 ---
 
 ## Collection / Library module

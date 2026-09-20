@@ -162,6 +162,12 @@
 @define-color bauhaus_value_insensitive alpha(@bauhaus_value, 0.5);
 @define-color bauhaus_value_text_insensitive alpha(@bauhaus_value_text, 0.5);
 
+/* Colour wheel handles (colorbalancergb 4-ways). Both the puck and the hue marker
+   read these; the widget falls back to opaque white over half-transparent black
+   when either one is absent. */
+@define-color colorwheel_handle_rim @grey_100;
+@define-color colorwheel_handle_edge alpha(@grey_00, 0.5);
+
 /* GTK Buttons and Text Fields */
 @define-color button_bg @grey_50;
 @define-color button_fg alpha(@fg_color, 0.55);
@@ -864,6 +870,19 @@ dialog .sidebar row:selected:hover label,
 
 .dt_plugin_ui_main #collapsible {
   padding: 0.28em 0.42em;
+}
+
+/* Colour wheel (colorbalancergb 4-ways). The widget paints its own disc edge to edge, so
+   it wants nothing but the panel showing through behind it. Class selector only: nothing in
+   src/ calls gtk_widget_class_set_css_name(), so a node selector would match no widget. */
+.dt_colorwheel {
+  background-color: transparent;
+  border: none;
+  margin: 0.25em 0 0.125em 0;
+}
+
+.dt_colorwheel:focus {
+  outline: none;
 }
 
 
