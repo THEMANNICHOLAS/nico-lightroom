@@ -55,6 +55,8 @@ set(LIB_ANSEL_UNIT_TESTS
   test_masks_raster_contract
   test_stroke_raster
   test_paint_module_switch
+  test_colorwheel
+  test_colorrings_display
 )
 
 foreach(test ${LIB_ANSEL_UNIT_TESTS})
@@ -87,3 +89,4 @@ target_sources(test_tagging_completion PRIVATE
 target_sources(test_tagging_completion_model PRIVATE
   ${CMAKE_SOURCE_DIR}/src/libs/tagging_completion.c)
 set_tests_properties(test_tagging_completion PROPERTIES SKIP_RETURN_CODE 77)
+set_tests_properties(test_colorwheel PROPERTIES SKIP_RETURN_CODE 77)
