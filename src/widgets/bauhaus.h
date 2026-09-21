@@ -119,6 +119,7 @@ typedef struct dt_bauhaus_slider_data_t
   float offset;         // addition before printing
 
   gboolean is_dragging;      // indicates is mouse is dragging slider
+  float value_width; // reserved width of the right-aligned value field, 0 = not measured yet
 } dt_bauhaus_slider_data_t;
 
 typedef enum dt_bauhaus_combobox_alignment_t
@@ -267,9 +268,7 @@ struct dt_bauhaus_t
   // appearance relevant stuff:
   // sizes and fonts:
   float line_height;                     // height of a line of text
-  float marker_size;                     // height of the slider indicator
-  float baseline_size;                   // height of the slider bar
-  float border_width;                    // width of the border of the slider marker
+  float marker_size;                     // outer diameter of the slider's ring indicator
   float quad_width;                      // width of the quad area to paint icons
   PangoFontDescription *pango_font_desc; // no need to recreate this for every string we want to print
 

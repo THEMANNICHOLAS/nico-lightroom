@@ -225,7 +225,7 @@ Draw rules:
 
 ## Progress
 - [x] Phase 1: Raster core — `bauhaus_draw` unit
-- [ ] Phase 2: Wire the ring-grip restyle into `bauhaus.c` and the theme
+- [x] Phase 2: Wire the ring-grip restyle into `bauhaus.c` and the theme
 - [ ] Phase 3: Inline value editor via a `GtkPopover`
 - [ ] Phase 4: Accurate Color primaries brightness ramp
 - [ ] Final verification
@@ -336,6 +336,12 @@ on-screen slider draws, in both the main widget and the popup.
   - Call `dt_bauhaus_draw_indicator` outside the `gtk_widget_is_sensitive` gate
     (:2875-2880) so disabled sliders draw the ring with the disabled style; wire
     `indicator_border` (:1148, currently unread) as the enabled ring colour.
+  - `_translate_cursor` (:306) and the cursor→value sites (:3666 press, :3702 release,
+    :3724 motion, and the popup's magnifier ratio at :924) → map through
+    `dt_bauhaus_x_to_pos` with the same metrics, so the ring stays under the cursor
+    (Discovery 2026-09-20).
+- `src/widgets/bauhaus.h` — one field on `dt_bauhaus_slider_data_t` (:100-122) caching the
+  reserved value width (Discovery 2026-09-20).
 - `data/themes/ansel.css` — `@bauhaus_indicator_border` from `@grey_50` to `@grey_95`
   (:153).
 
@@ -379,13 +385,17 @@ on-screen slider draws, in both the main widget and the popup.
 2. Replace the two draw-function bodies with calls into `bauhaus_draw`; change the ramp alpha.
 3. Add the measured value width and apply it at all four split sites.
 4. Un-gate the disabled indicator and wire `indicator_border`; change the CSS token.
-5. Build, stage, and run the manual checks above.
+5. Map the cursor through `dt_bauhaus_x_to_pos` at the press/release/motion and popup-ratio
+   sites (Discovery 2026-09-20).
+6. Build, stage, and run the manual checks above.
 
 **Acceptance criteria:**
-- [ ] `test_bauhaus_draw` still passes after the wiring.
-- [ ] No `src/iop/` source file is modified by this phase (only `bauhaus.c` + the CSS).
-- [ ] Every `baseline_size`/`marker_size` consumer still compiles and behaves (quad buttons,
+- [x] `test_bauhaus_draw` still passes after the wiring.
+- [x] No `src/iop/` source file is modified by this phase (only `bauhaus.c` + the CSS).
+- [x] Every ~~`baseline_size`~~/`marker_size` consumer still compiles and behaves (quad buttons,
   comboboxes unaffected — `_widget_get_main_width` applies `marker_size` only to sliders).
+  `baseline_size`/`border_width` were removed from `dt_bauhaus_t` (write-only after the restyle);
+  the quad hit boundary regression the first 3F pass found is fixed (see the handoff log).
 
 ### Phase 3: Inline value editor via a `GtkPopover`
 **Risk:** flagged (!#2, !#3, !#6)
@@ -578,6 +588,48 @@ correction. Empty at plan creation. -->
 <!-- Non-contradictory findings logged by /implement during execution (act / defer / drop).
 Append-only, empty at plan creation. -->
 
+2026-09-20 — Phase 2: the new symmetric rail inset changes the cursor→value mapping, which the
+phase text never mentions. `pos_to_x(p) = inset + p*(width - 2*inset)` means a click lands the
+ring under the cursor only if the input path uses `dt_bauhaus_x_to_pos` with the same `BhMetrics`.
+The current code divides a cursor x that was pre-shifted by `0.5*marker_size` by a width that was
+reduced by the same radius (`bauhaus.c:308, 212, 3666, 3702, 3724`). Left as-is, the ring lags the
+cursor by up to `BH_MARKER/2` = 7 px at the right end (where the old geometry was flush and the new
+one stops 7 px short), and ~2-3 px at the left. → Suggested action: act now, convert
+`_translate_cursor` to subtract only margin/padding and use `dt_bauhaus_x_to_pos` at the three
+main-widget sites; keep the popup's own fine-tune ratio math otherwise.
+
+2026-09-20 — Phase 2: the reserved value width (D5) needs a per-slider cache, but Phase 2's file
+list names only `bauhaus.c` and the CSS. There is no spare field in `dt_bauhaus_slider_data_t`
+(`bauhaus.h:100-122`) and no draw-free text-measure helper exists in `bauhaus.c`
+(`show_pango_text` at :673 always draws). → Suggested action: act now, add one field to that
+struct in `src/widgets/bauhaus.h`, set it from the widest formatted min/max, and invalidate it in
+`dt_bauhaus_slider_set_format|set_factor|set_offset|set_digits` (:3339-3431, none of which
+currently queues a redraw); the alternative is recomputing per call with no cache, which pays a
+Pango measure on every draw and every motion-event hit test.
+
+2026-09-20 — Phase 2: `_widget_get_main_width`'s post-restyle contract is ambiguous ("reserve the
+measured value width and the larger marker inset"). → Settled in the phase impl plan (no
+developer decision needed): the rail width is `total - quad - 2*INNER_PADDING` and the unit applies
+the 7 px inset itself (the old `- slider_cursor_radius` term goes away), `text_width` becomes that
+same value so the value is right-aligned flush with the rail's right edge, and the reserved value
+width only sizes the label split (`label_width = text_width - value_w - INNER_PADDING`).
+
+2026-09-20 — Phase 2 (3F SIMPLIFY report, **deferred**): `_bh_get_active_region` ends with an
+unreachable `return BH_REGION_OUT;` after an `if/else` that returns from both branches. It is
+pre-existing (present before this phase) and harmless. → Later cleanup, or drop; logging so it is
+not re-raised.
+
+2026-09-20 — Phase 2 (3F SIMPLIFY report, **deferred**): the eight draw alphas in
+`bauhaus_draw.c:26-33` restate the values settled in the Phase 1 impl plan instead of deriving
+from a named token. They exist only inside that unit and nothing else reads them. → No action
+needed; noting so it is not re-raised.
+
+2026-09-20 — Phase 2 (review note, **open verification**): `_measure_text` measures under the
+default cairo CTM while `show_pango_text` draws under `dt_cairo_surface_create_at_scale(..., dt_widget_ppd())`.
+`pango_layout_get_size` is CTM-independent so the widths should agree, but this link in the D5
+chain cannot be settled read-only. → The Phase 2 manual check on a non-1.0 display scale
+(value not clipped or overlapping) is the test; if it fails, scale the measurement by `dt_widget_ppd()`.
+
 ## Phase Handoff Log
 <!-- Written by /implement at each 3G phase gate (Done / Learned / Drift / Watch-next per
 phase). Append-only, empty at plan creation. MUST remain the LAST section of this file:
@@ -610,3 +662,33 @@ never add a section below it. -->
   `fill` = `color_value` (`@orange_dark`), `ring` = `indicator_border` (CSS token changes
   `@grey_50` → `@grey_95`). `dt_bauhaus_draw_ring` must be called outside the
   `gtk_widget_is_sensitive` gate (`bauhaus.c:2875-2880`) for disabled sliders to draw a ring.
+
+### 2026-09-20 — Phase 2: Wire the ring-grip restyle into bauhaus.c and the theme
+- Done: `dt_bauhaus_load_theme` now sets `baseline_size`/`marker_size` from the unit's
+  `BH_BASELINE`/`BH_MARKER`; the three layout getters derive from the same constants;
+  `_widget_get_main_width` returns the full rail width; both draw wrappers forward to
+  `dt_bauhaus_draw_track`/`_ring`; the ring is drawn outside the sensitivity gate with a
+  35%-white disabled style; `indicator_border` is wired and the CSS token moved `@grey_50` →
+  `@grey_95`; a measured per-slider value width (`value_width` on `dt_bauhaus_slider_data_t`)
+  now sizes the label split in both the widget and the popup; the cursor→value mapping goes
+  through `dt_bauhaus_x_to_pos`.
+- Learned: (1) dropping `-slider_cursor_radius` from `_widget_get_main_width` silently moved the
+  MAIN/QUAD hit boundary half a marker into every quad — `_translate_cursor` still shifts slider
+  cursors left by half a marker, so `_bh_get_active_region` must add that shift back
+  (`cursor_shift`) before comparing. Any future change to `_widget_get_main_width` must re-check
+  that boundary. (2) `baseline_size` and `border_width` are gone from `dt_bauhaus_t`; `BH_BASELINE`
+  and `BH_MARKER` are the single source of truth, and `marker_size` must stay `BH_MARKER` so the
+  cursor shift and the unit's `inset` agree. (3) `show_pango_text` and `_measure_text` share
+  `_resolve_font`, so a measured string and a drawn one cannot drift. (4) `_get_slider_height` =
+  margins/paddings + `line_h + 21` (at `line_h` 16 that is 37 px) — risk !#1 is real: every row
+  grew ~8 px, and the visual checks below are unrun. (5) The popup magnifier keeps its own
+  translate and ratio; its rail now extends 7 px further right (accepted, see the impl plan §2).
+- Drift: none. Two plan gaps were approved through `## Discoveries` instead (cursor mapping; the
+  `value_width` field on `dt_bauhaus_slider_data_t`), and the phase's `Files`/`Steps` text was
+  amended in place to record them.
+- Watch-next: **Phase 2's five manual visual checks have NOT been run** (no display here) — run
+  them on `build/stage/bin/ansel.exe` before Phase 3's results are trusted: rail+ring on every
+  slider, ramp through the ring on dense modules, row height, disabled ring, unit-suffixed value
+  width, and the right-click calculator popup. Phase 3 must add `BH_REGION_VALUE` to
+  `_bh_active_region_t` and test it **before** `BH_REGION_MAIN` in `_bh_get_active_region`, where
+  the new `cursor_shift` expression now sits — and must not touch the popup or its input grab.

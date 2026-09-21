@@ -82,6 +82,7 @@
 #ifdef GDK_WINDOWING_WAYLAND
 #include <gdk/gdkwayland.h>
 #endif
+#include "widgets/bauhaus_draw.h"
 
 G_DEFINE_TYPE(DtBauhausWidget, dt_bh, GTK_TYPE_DRAWING_AREA)
 
@@ -205,11 +206,8 @@ static double _widget_get_total_width(struct dt_bauhaus_widget_t *w, GtkWidget *
 static double _widget_get_main_width(struct dt_bauhaus_widget_t *w, GtkWidget *widget, double *total_width)
 {
   const double tot_width = _widget_get_total_width(w, widget);
-  // Slider cursors are centered on the scale bounds, so the scale starts one
-  // cursor radius after the text origin while keeping its right edge flush.
-  const double slider_cursor_radius = (w->type == DT_BAUHAUS_SLIDER) ? 0.5 * w->bauhaus->marker_size : 0.0;
   if(total_width) *total_width = tot_width;
-  return tot_width - _widget_get_quad_width(w) - 2. * INNER_PADDING - slider_cursor_radius;
+  return tot_width - _widget_get_quad_width(w) - 2. * INNER_PADDING;
 }
 
 /**
@@ -255,20 +253,24 @@ static double _get_combobox_height(GtkWidget *widget)
 static double _get_slider_height(GtkWidget *widget)
 {
   struct dt_bauhaus_widget_t *w = (struct dt_bauhaus_widget_t *)widget;
-  return w->margin->top + w->padding->top + w->margin->bottom + w->padding->bottom + INNER_PADDING / 2.
-         + 2. * w->bauhaus->border_width + w->bauhaus->line_height + w->bauhaus->marker_size;
+  /* Derived, not guessed: padding, label row, gap, rail, the ring's overhang below the rail,
+   * padding. The outer margin/padding terms are kept from the previous formula so a themed
+   * widget box still clips nothing. */
+  const double content = BH_PAD + w->bauhaus->line_height + BH_GAP + BH_BASELINE
+                         + (BH_MARKER - BH_BASELINE) / 2.0 + BH_PAD;
+  return ceil(w->margin->top + w->padding->top + w->margin->bottom + w->padding->bottom + content);
 }
 
 static double _get_indicator_y_position(struct dt_bauhaus_widget_t *w)
 {
-  return w->bauhaus->line_height + INNER_PADDING + w->bauhaus->baseline_size / 2.0f;
+  /* Rail centre in content coordinates. */
+  return BH_PAD + w->bauhaus->line_height + BH_GAP + BH_BASELINE / 2.0;
 }
 
 static double _get_slider_bar_height(struct dt_bauhaus_widget_t *w)
 {
-  // Total height of the text label + slider baseline, discarding padding
-  return w->bauhaus->line_height + INNER_PADDING + w->bauhaus->baseline_size;
-
+  /* Rail bottom in content coordinates: what the popup magnifier normalizes against. */
+  return BH_PAD + w->bauhaus->line_height + BH_GAP + BH_BASELINE;
 }
 
 static double _get_combobox_popup_height(struct dt_bauhaus_widget_t *w)
@@ -351,7 +353,11 @@ static _bh_active_region_t _bh_get_active_region(GtkWidget *widget, double *x, d
   // Check where we are horizontally
   // The quad now begins exactly 2*INNER_PADDING past the main area for both
   // sliders and comboboxes (see the quad draw sites), so use the same boundary.
-  if(*x <= main_width + 2. * INNER_PADDING)
+  // A slider's cursor arrived shifted left by half a marker (see _translate_cursor), so put
+  // it back in rail space first: without that the boundary falls half a marker inside the
+  // quad and eats the left side of its clickable area.
+  const double cursor_shift = (w->type == DT_BAUHAUS_SLIDER) ? 0.5 * w->bauhaus->marker_size : 0.0;
+  if(*x + cursor_shift <= main_width + 2. * INNER_PADDING)
     return BH_REGION_MAIN;
   else
     return BH_REGION_QUAD;
@@ -655,6 +661,38 @@ typedef enum _bh_halign_t
 } _bh_halign_t;
 
 /**
+ * @brief Resolve the font `show_pango_text()` draws with.
+ *
+ * The cached widget font, with the CSS weight, style, variant, stretch and family applied —
+ * deliberately NOT the CSS size, which would fight the widget's own scaling. Shared with
+ * `_measure_text()` so a measured string is exactly as wide as the drawn one.
+ *
+ * @param w The current widget
+ * @param context Gtk CSS context, already in the right state
+ * @param state The GTK state flags to read the font for
+ * @return A newly allocated PangoFontDescription the caller must free.
+ */
+static PangoFontDescription *_resolve_font(struct dt_bauhaus_widget_t *w, GtkStyleContext *context,
+                                           GtkStateFlags state)
+{
+  PangoFontDescription *css_font = NULL;
+  gtk_style_context_get(context, state, GTK_STYLE_PROPERTY_FONT, &css_font, NULL);
+  PangoFontDescription *resolved = pango_font_description_copy(w->bauhaus->pango_font_desc);
+
+  if(css_font)
+  {
+    // Apply only style-related fields, NOT size
+    pango_font_description_set_weight(resolved, pango_font_description_get_weight(css_font));
+    pango_font_description_set_style(resolved, pango_font_description_get_style(css_font));
+    pango_font_description_set_variant(resolved, pango_font_description_get_variant(css_font));
+    pango_font_description_set_stretch(resolved, pango_font_description_get_stretch(css_font));
+    pango_font_description_set_family(resolved, pango_font_description_get_family(css_font));
+    pango_font_description_free(css_font);
+  }
+  return resolved;
+}
+
+/**
  * @brief Display text aligned in a bounding box, with pseudo-classes properties handled, and optional background color.
  *
  * @param w The current widget
@@ -686,20 +724,7 @@ static void show_pango_text(struct dt_bauhaus_widget_t *w,
   if(IS_NULL_PTR(text)) return;
 
   // Prepare context and font properties
-  PangoFontDescription *css_font = NULL;
-  gtk_style_context_get(context, state, GTK_STYLE_PROPERTY_FONT, &css_font, NULL);
-  PangoFontDescription *resolved = pango_font_description_copy(w->bauhaus->pango_font_desc);
-
-  if(css_font)
-  {
-    // Apply only style-related fields, NOT size
-    pango_font_description_set_weight(resolved, pango_font_description_get_weight(css_font));
-    pango_font_description_set_style(resolved, pango_font_description_get_style(css_font));
-    pango_font_description_set_variant(resolved, pango_font_description_get_variant(css_font));
-    pango_font_description_set_stretch(resolved, pango_font_description_get_stretch(css_font));
-    pango_font_description_set_family(resolved, pango_font_description_get_family(css_font));
-    pango_font_description_free(css_font);
-  }
+  PangoFontDescription *resolved = _resolve_font(w, context, state);
 
   // --- Propagate GTK's font rendering settings to the Cairo context ---
   //
@@ -1223,9 +1248,7 @@ void dt_bauhaus_load_theme(dt_bauhaus_t *bauhaus)
   bauhaus->line_height = pango_height / PANGO_SCALE;
   bauhaus->quad_width = bauhaus->line_height;
 
-  bauhaus->baseline_size = 5; // absolute size in Cairo unit
-  bauhaus->border_width = 1; // absolute size in Cairo unit
-  bauhaus->marker_size = pango_height / PANGO_SCALE * 0.6;
+  bauhaus->marker_size = BH_MARKER; // the ring's outer diameter, in Cairo units
 }
 
 dt_bauhaus_t * dt_bauhaus_init()
@@ -1411,6 +1434,7 @@ void dt_bauhaus_slider_set_hard_min(GtkWidget* widget, float val)
   dt_bauhaus_slider_data_t *d = &w->data.slider;
   float current_position = dt_bauhaus_slider_get(widget);
   float desired_position = _bh_round_to_n_digits(w, val);
+  d->value_width = 0.f; // the reserved value field is measured from the hard bounds
   d->min = MAX(d->min, d->hard_min);
   d->soft_min = MAX(d->soft_min, d->hard_min);
 
@@ -1436,6 +1460,7 @@ void dt_bauhaus_slider_set_hard_max(GtkWidget* widget, float val)
   float current_position = dt_bauhaus_slider_get(widget);
   float desired_position = _bh_round_to_n_digits(w, val);
   d->hard_max = desired_position;
+  d->value_width = 0.f; // the reserved value field is measured from the hard bounds
   d->max = MIN(d->max, d->hard_max);
   d->soft_max = MIN(d->soft_max, d->hard_max);
 
@@ -1653,7 +1678,12 @@ static void _style_updated(GtkWidget *widget)
   if(w->type == DT_BAUHAUS_COMBOBOX)
     gtk_widget_set_size_request(widget, -1, _get_combobox_height(widget));
   else if(w->type == DT_BAUHAUS_SLIDER)
+  {
+    // The reserved value width is measured from the font resolved by this style; a font or
+    // zoom change makes the previous measurement stale.
+    w->data.slider.value_width = 0.f;
     gtk_widget_set_size_request(widget, -1, _get_slider_height(widget));
+  }
 }
 
 GtkWidget *dt_bauhaus_slider_from_widget(dt_bauhaus_t *bh, dt_bauhaus_widget_t *w,dt_gui_module_t *self, float min, float max,
@@ -2191,38 +2221,96 @@ void dt_bauhaus_slider_set_stop(GtkWidget *widget, float stop, float r, float g,
   }
 }
 
+/* The colour of the ring while the pointer is on the track; not a theme token. */
+static const GdkRGBA _bh_ring_hover = { 1.0, 1.0, 1.0, 1.0 };
+
+/** Pixel width of @p text in the font show_pango_text() draws with — the same `_resolve_font()`
+ * result, so a measured string and a drawn one agree. */
+static float _measure_text(struct dt_bauhaus_widget_t *w, GtkWidget *widget, const char *text)
+{
+  PangoContext *pc = gtk_widget_get_pango_context(widget);
+  PangoLayout *layout = pango_layout_new(pc);
+  PangoFontDescription *resolved = _resolve_font(w, gtk_widget_get_style_context(widget),
+                                                gtk_widget_get_state_flags(widget));
+  pango_layout_set_font_description(layout, resolved);
+  pango_font_description_free(resolved);
+  pango_layout_set_text(layout, text, -1);
+  int pw = 0, ph = 0;
+  pango_layout_get_size(layout, &pw, &ph);
+  g_object_unref(layout);
+  return (float)pw / PANGO_SCALE;
+}
+
+/** Reserved width of the value field, measured once from the widest formatted bound. The
+ * hard bounds are used, not the soft min/max, because a drag mutates d->min/d->max
+ * (bauhaus.c:3315-3322) and the reserved width must stay constant between redraws. */
+static float _slider_value_width(struct dt_bauhaus_widget_t *w, GtkWidget *widget)
+{
+  dt_bauhaus_slider_data_t *d = &w->data.slider;
+  if(d->value_width > 0.f) return d->value_width;
+  char *lo = dt_bauhaus_slider_get_text(widget, d->hard_min);
+  char *hi = dt_bauhaus_slider_get_text(widget, d->hard_max);
+  d->value_width = fmaxf(_measure_text(w, widget, lo), _measure_text(w, widget, hi));
+  dt_free(lo);
+  dt_free(hi);
+  return d->value_width;
+}
+
+/** Populate the raster metrics. `width` is the rail width in content coordinates. */
+static void _bh_build_metrics(struct dt_bauhaus_widget_t *w, GtkWidget *widget,
+                              const double width, BhMetrics *m)
+{
+  m->line_h = w->bauhaus->line_height;
+  m->track_cy = _get_indicator_y_position(w);
+  m->track_top = m->track_cy - BH_BASELINE / 2.0;
+  m->inset = BH_MARKER / 2.0;
+  m->width = width;
+  m->value_w = _slider_value_width(w, widget);
+}
+
+/** Populate the draw state. @p stops is caller-owned scratch for at most
+ * DT_BAUHAUS_SLIDER_MAX_STOPS ramps, whose positions are renormalized from the stored
+ * hard-range mapping into the unit's 0..1 display space. */
+static void _bh_build_state(struct dt_bauhaus_widget_t *w, const float pos,
+                            BhGradStop *stops, BhTrackState *s)
+{
+  const dt_bauhaus_slider_data_t *d = &w->data.slider;
+  const double span = d->hard_max - d->hard_min;
+  const double zoom = (d->max - d->min) / span;
+  const double offset = (d->min - d->hard_min) / span;
+
+  memset(s, 0, sizeof(*s));
+  s->frac = pos;
+  /* where the fill grows from: the parameter's zero, mapped to a fraction */
+  s->origin = fmaxf(fminf((d->factor > 0 ? -d->min - d->offset / d->factor
+                                         :  d->max + d->offset / d->factor) / (d->max - d->min),
+                          1.0f), 0.0f);
+  s->disabled = !gtk_widget_is_sensitive(GTK_WIDGET(w));
+  s->hot = (gtk_widget_get_state_flags(GTK_WIDGET(w)) & GTK_STATE_FLAG_PRELIGHT) != 0
+           || d->is_dragging;
+  s->grad_cnt = d->grad_cnt;
+  for(int k = 0; k < d->grad_cnt; k++)
+  {
+    stops[k].pos = (d->grad_pos[k] - offset) / zoom;
+    stops[k].r = d->grad_col[k][0];
+    stops[k].g = d->grad_col[k][1];
+    stops[k].b = d->grad_col[k][2];
+  }
+  s->grad = stops;
+  s->fill = &w->bauhaus->color_value;
+  s->ring = &w->bauhaus->indicator_border;
+  s->ring_hover = &_bh_ring_hover;
+  s->halo = &w->bauhaus->color_value_text;
+}
+
 static void dt_bauhaus_draw_indicator(struct dt_bauhaus_widget_t *w, float pos, cairo_t *cr, float wd)
 {
-  // draw scale indicator (the tiny triangle)
-  const float size = w->bauhaus->marker_size;
-  const float vertical_position = _get_indicator_y_position(w);
-  const float horizontal_position = pos * wd;
-
-  cairo_save(cr);
-  cairo_translate(cr, horizontal_position, vertical_position);
-
-  const dt_bauhaus_slider_data_t *d = &w->data.slider;
-  const gboolean has_colored_background = d->grad_cnt > 0;
-
-  if(!has_colored_background && d->fill_feedback)
-  {
-    // Plain indicator (regular sliders)
-    cairo_arc(cr, 0, 0, size / 2., 0, M_PI * 2);
-    set_color(cr, w->bauhaus->color_fg);
-    cairo_set_line_width(cr, 0);
-    cairo_fill(cr);
-  }
-  else
-  {
-    // Hollow indicator to keep the slider background visible through the marker.
-    const float border = (size - w->bauhaus->baseline_size) / 2.;
-    set_color(cr, w->bauhaus->color_fg);
-    cairo_set_line_width(cr, border);
-    const float radius = size / 2. - border / 2.;
-    cairo_arc(cr, 0, 0, radius, 0, M_PI * 2);
-    cairo_stroke(cr);
-  }
-  cairo_restore(cr);
+  BhMetrics m;
+  BhTrackState s;
+  BhGradStop stops[DT_BAUHAUS_SLIDER_MAX_STOPS];
+  _bh_build_metrics(w, GTK_WIDGET(w), wd, &m);
+  _bh_build_state(w, pos, stops, &s);
+  dt_bauhaus_draw_ring(cr, &m, &s);
 }
 
 static void dt_bauhaus_draw_quad(struct dt_bauhaus_widget_t *w, cairo_t *cr, const double x, const double y)
@@ -2265,103 +2353,12 @@ static void dt_bauhaus_draw_quad(struct dt_bauhaus_widget_t *w, cairo_t *cr, con
  */
 static void dt_bauhaus_draw_baseline(struct dt_bauhaus_widget_t *w, cairo_t *cr, float width)
 {
-  // draw line for orientation in slider
-  cairo_save(cr);
-  dt_bauhaus_slider_data_t *d = &w->data.slider;
-  const gboolean has_colored_background = d->grad_cnt > 0;
-  const float baseline_top = w->bauhaus->line_height + INNER_PADDING;
-  const float baseline_height = w->bauhaus->baseline_size;
-  const gboolean is_sensitive = gtk_widget_is_sensitive(GTK_WIDGET(w));
-
-  // the background of the line
-  // Note: to ensure the indicator is not clipped on the left side,
-  // we push the whole slider of an indicator radius to the right.
-  // Issue is that leaves a dent on the baseline, so the trick
-  // is to make it overlap back by a radius on the left.
-  const double x_origin = -w->bauhaus->marker_size / 3.;
-  // The left edge was pushed by x_origin to overlap the indicator's leftmost
-  // resting position. Extend the width by the same amount so the right edge
-  // stays at `width` (flush with the right-aligned numeric value) instead of
-  // retreating by |x_origin| and letting the value overhang the baseline.
-  const double baseline_width = width - x_origin;
-  // Make sure we use integer coordinates to limit anti-aliasing blur
-  cairo_rectangle(cr, round(x_origin), round(baseline_top), 
-                      round(baseline_width), round(baseline_height));
-
-  cairo_pattern_t *gradient = NULL;
-  if(has_colored_background && is_sensitive)
-  {
-    // gradient line as used in some modules for hue, saturation, lightness
-    const double zoom = (d->max - d->min) / (d->hard_max - d->hard_min);
-    const double offset = (d->min - d->hard_min) / (d->hard_max - d->hard_min);
-    gradient = cairo_pattern_create_linear(x_origin, 0, width, baseline_height);
-    for(int k = 0; k < d->grad_cnt; k++)
-      cairo_pattern_add_color_stop_rgba(gradient, (d->grad_pos[k] - offset) / zoom,
-                                        d->grad_col[k][0], d->grad_col[k][1], d->grad_col[k][2], 0.4f);
-    cairo_set_source(cr, gradient);
-  }
-  else
-  {
-    // regular baseline
-    set_color(cr, w->bauhaus->color_bg);
-  }
-
-  cairo_fill(cr);
-
-
-  if(w->bauhaus->border_width > 0)
-  {
-    // Draw the border on top
-    // We need to recess the coordinates by half a line-width for perfect border matching
-    const double line_width = 1.;
-    cairo_rectangle(cr, round(x_origin) + line_width / 2., round(baseline_top) + line_width / 2., 
-                        round(baseline_width) - line_width, round(baseline_height) - line_width);
-    cairo_set_line_width(cr, line_width);
-    set_color(cr, w->bauhaus->color_border);
-    cairo_stroke(cr);
-  }
-
-  if(gradient) cairo_pattern_destroy(gradient);
-
-  // get the reference of the slider aka the position of the 0 value
-  float origin = fmaxf(fminf((d->factor > 0 ? -d->min - d->offset/d->factor
-                                            :  d->max + d->offset/d->factor)
-                              / (d->max - d->min), 
-                             1.0f) * width, 
-                       0.f);
-
-  // have a `fill ratio feel' from zero to current position
-  if(!has_colored_background && d->fill_feedback && is_sensitive)
-  {
-    set_color(cr, w->bauhaus->color_value);
-
-    const float position = d->pos * width;
-    const float delta = position - origin;
-    
-    // origin = 0 means start on left, but our left is shifted to the right,
-    // so offset it. (see x_origin)
-    if(origin == 0.f)
-      cairo_rectangle(cr, x_origin, baseline_top, delta - x_origin, baseline_height);
-    else
-      cairo_rectangle(cr, origin, baseline_top, delta, baseline_height);
-
-    cairo_fill(cr);
-  }
-
-  // draw the 0 reference graduation if it's different than the bounds of the slider
-  // If the max of the slider is 360, it is likely an absolute hue slider in degrees
-  // a zero in periodic stuff has not much meaning so we skip it.
-  if(d->hard_max != 360.0f && is_sensitive)
-  {
-    set_color(cr, w->bauhaus->color_fg);
-
-    // If we are to put the 0 reference on the "left", this time we need to account for
-    // actual leftmost resting position of the indicator, not the starting point of the baseline.
-    cairo_arc(cr, origin, baseline_top + w->bauhaus->marker_size, w->bauhaus->border_width / 2., 0, 2 * M_PI);
-    cairo_fill(cr);
-  }
-
-  cairo_restore(cr);
+  BhMetrics m;
+  BhTrackState s;
+  BhGradStop stops[DT_BAUHAUS_SLIDER_MAX_STOPS];
+  _bh_build_metrics(w, GTK_WIDGET(w), width, &m);
+  _bh_build_state(w, w->data.slider.pos, stops, &s);
+  dt_bauhaus_draw_track(cr, &m, &s);
 }
 
 static void dt_bauhaus_widget_reject(struct dt_bauhaus_widget_t *w)
@@ -2555,7 +2552,6 @@ static gboolean dt_bauhaus_popup_draw(GtkWidget *widget, cairo_t *crf, gpointer 
       cairo_save(cr);
       set_color(cr, w->bauhaus->color_value_text);
 
-      float value_width = 0.f;
       char *text = dt_bauhaus_slider_get_text(GTK_WIDGET(w), dt_bauhaus_slider_get(GTK_WIDGET(w)));
       GdkRectangle bounding_value = { .x = 0.,
                                       .y = 0.,
@@ -2564,12 +2560,12 @@ static gboolean dt_bauhaus_popup_draw(GtkWidget *widget, cairo_t *crf, gpointer 
       // Display user keyboard input if any, otherwise the current value
       show_pango_text(w, context, cr, &bounding_value,
                       (w->bauhaus->keys_cnt) ? w->bauhaus->keys : text, BH_ALIGN_RIGHT,
-                      BH_ALIGN_MIDDLE, PANGO_ELLIPSIZE_NONE, NULL, &value_width, NULL, GTK_STATE_FLAG_NORMAL);
+                      BH_ALIGN_MIDDLE, PANGO_ELLIPSIZE_NONE, NULL, NULL, NULL, GTK_STATE_FLAG_NORMAL);
       dt_free(text);
 
       // label on top of marker:
       gchar *label_text = _build_label(w);
-      const float label_width = text_width - value_width - INNER_PADDING;
+      const float label_width = text_width - _slider_value_width(w, GTK_WIDGET(w)) - INNER_PADDING;
       GdkRectangle bounding_label = { .x = 0.,
                                       .y = 0.,
                                       .width = label_width,
@@ -2853,14 +2849,10 @@ static gboolean _widget_draw(GtkWidget *widget, cairo_t *crf)
     }
     case DT_BAUHAUS_SLIDER:
     {
-      const double slider_cursor_radius = 0.5 * w->bauhaus->marker_size;
-      const double text_width = available_width + slider_cursor_radius;
+      const double text_width = available_width;
 
       // line for orientation
-      cairo_save(cr);
-      cairo_translate(cr, slider_cursor_radius, 0.0);
       dt_bauhaus_draw_baseline(w, cr, available_width);
-      cairo_restore(cr);
 
       // Paint the non-active quad icon with some transparency, because
       // icons are bolder than the neighbouring text and appear brighter.
@@ -2871,14 +2863,11 @@ static gboolean _widget_draw(GtkWidget *widget, cairo_t *crf)
       dt_bauhaus_draw_quad(w, cr, text_width + 2. * INNER_PADDING, 0.);
       cairo_restore(cr);
 
-      float value_width = 0;
+      // The ring is drawn even when the widget is insensitive: the unit dims it itself.
+      dt_bauhaus_draw_indicator(w, w->data.slider.pos, cr, available_width);
+
       if(gtk_widget_is_sensitive(widget))
       {
-        cairo_save(cr);
-        cairo_translate(cr, slider_cursor_radius, 0.0);
-        dt_bauhaus_draw_indicator(w, w->data.slider.pos, cr, available_width);
-        cairo_restore(cr);
-
         char *text = dt_bauhaus_slider_get_text(widget, dt_bauhaus_slider_get(widget));
         GdkRectangle bounding_value = { .x = 0.,
                                         .y = 0.,
@@ -2886,13 +2875,13 @@ static gboolean _widget_draw(GtkWidget *widget, cairo_t *crf)
                                         .height = w->bauhaus->line_height };
         set_color(cr, *value_text_color);
         show_pango_text(w, context, cr, &bounding_value, text, BH_ALIGN_RIGHT, BH_ALIGN_MIDDLE,
-                        PANGO_ELLIPSIZE_NONE, NULL, &value_width, NULL, state);
+                        PANGO_ELLIPSIZE_NONE, NULL, NULL, NULL, state);
         dt_free(text);
       }
 
       // label on top of marker:
       gchar *label_text = _build_label(w);
-      const float label_width = text_width - value_width - INNER_PADDING;
+      const float label_width = text_width - _slider_value_width(w, GTK_WIDGET(w)) - INNER_PADDING;
       GdkRectangle bounding_label = { .x = 0.,
                                       .y = 0.,
                                       .width = label_width,
@@ -3341,6 +3330,7 @@ void dt_bauhaus_slider_set_digits(GtkWidget *widget, int val)
   struct dt_bauhaus_widget_t *w = DT_BAUHAUS_WIDGET(widget);
   dt_bauhaus_slider_data_t *d = &w->data.slider;
   d->digits = val;
+  d->value_width = 0.f;
 }
 
 int dt_bauhaus_slider_get_digits(GtkWidget *widget)
@@ -3414,6 +3404,7 @@ void dt_bauhaus_slider_set_format(GtkWidget *widget, const char *format)
     // change and every redraw, and there is no such thing as fewer than zero decimals.
     d->digits = MAX(d->digits - 2, 0);
   }
+  d->value_width = 0.f;
 }
 
 void dt_bauhaus_slider_set_factor(GtkWidget *widget, float factor)
@@ -3421,6 +3412,7 @@ void dt_bauhaus_slider_set_factor(GtkWidget *widget, float factor)
   struct dt_bauhaus_widget_t *w = DT_BAUHAUS_WIDGET(widget);
   dt_bauhaus_slider_data_t *d = &w->data.slider;
   d->factor = factor;
+  d->value_width = 0.f;
 }
 
 void dt_bauhaus_slider_set_offset(GtkWidget *widget, float offset)
@@ -3428,6 +3420,7 @@ void dt_bauhaus_slider_set_offset(GtkWidget *widget, float offset)
   struct dt_bauhaus_widget_t *w = DT_BAUHAUS_WIDGET(widget);
   dt_bauhaus_slider_data_t *d = &w->data.slider;
   d->offset = offset;
+  d->value_width = 0.f;
 }
 
 static void _commit_slider_value(struct dt_bauhaus_widget_t *w)
@@ -3663,7 +3656,11 @@ static gboolean dt_bauhaus_slider_button_press(GtkWidget *widget, GdkEventButton
         {
           // single left click on slider bar : set new value
           d->is_dragging = 1;
-          dt_bauhaus_slider_set_normalized(w, event_x / main_width, FALSE);
+          // _translate_cursor() reduced x by the marker radius; undo it to land back in rail
+          // space, then map through the unit so the ring lands under the cursor.
+          BhMetrics m;
+          _bh_build_metrics(w, GTK_WIDGET(w), main_width, &m);
+          dt_bauhaus_slider_set_normalized(w, dt_bauhaus_x_to_pos(&m, event_x + 0.5 * w->bauhaus->marker_size), FALSE);
         }
       }
     }
@@ -3699,7 +3696,9 @@ static gboolean dt_bauhaus_slider_button_release(GtkWidget *widget, GdkEventButt
 
     if(event->button == 1)
     {
-      dt_bauhaus_slider_set_normalized(w, w->bauhaus->mouse_x / _widget_get_main_width(w, NULL, NULL), TRUE);
+      BhMetrics m;
+      _bh_build_metrics(w, GTK_WIDGET(w), _widget_get_main_width(w, NULL, NULL), &m);
+      dt_bauhaus_slider_set_normalized(w, dt_bauhaus_x_to_pos(&m, w->bauhaus->mouse_x + 0.5 * w->bauhaus->marker_size), TRUE);
       return TRUE;
     }
   }
@@ -3721,7 +3720,9 @@ static gboolean dt_bauhaus_slider_motion_notify(GtkWidget *widget, GdkEventMotio
 
     w->bauhaus->mouse_x = event_x;
     w->bauhaus->mouse_y = event_y;
-    dt_bauhaus_slider_set_normalized(w, event_x / main_width, TRUE);
+    BhMetrics m;
+    _bh_build_metrics(w, GTK_WIDGET(w), main_width, &m);
+    dt_bauhaus_slider_set_normalized(w, dt_bauhaus_x_to_pos(&m, event_x + 0.5 * w->bauhaus->marker_size), TRUE);
   }
 
   return activated;

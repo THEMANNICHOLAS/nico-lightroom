@@ -150,7 +150,7 @@
 @define-color bauhaus_bg @recessed_color_bg;
 @define-color bauhaus_fg shade(@fg_color, 0.95);
 @define-color bauhaus_border @recessed_color_border;
-@define-color bauhaus_indicator_border @grey_50;
+@define-color bauhaus_indicator_border @grey_95;
 @define-color bauhaus_fill @grey_70;
 @define-color bauhaus_value @orange_dark;
 @define-color bauhaus_value_text @orange_light;
