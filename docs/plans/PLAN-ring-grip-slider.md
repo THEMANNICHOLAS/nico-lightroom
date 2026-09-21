@@ -1,6 +1,6 @@
 # PLAN: Ring-grip slider restyle + inline value editing
 
-**Status:** In Progress
+**Status:** Complete
 **Created:** 2026-09-20
 **Type:** Single plan
 
@@ -227,7 +227,7 @@ Draw rules:
 - [x] Phase 1: Raster core — `bauhaus_draw` unit
 - [x] Phase 2: Wire the ring-grip restyle into `bauhaus.c` and the theme
 - [x] Phase 3: Inline value editor via a `GtkPopover`
-- [ ] Phase 4: Accurate Color primaries brightness ramp
+- [x] Phase 4: Accurate Color primaries brightness ramp
 - [ ] Final verification
 
 ## Phases
@@ -504,7 +504,7 @@ saturated hue.
 2. Build and stage; open Color primaries and confirm the ramp.
 
 **Acceptance criteria:**
-- [ ] Only the brightness branch of `_refresh_slider_gradients` changed in `colorprimaries.c`.
+- [x] Only the brightness branch of `_refresh_slider_gradients` changed in `colorprimaries.c`.
 - [ ] Color primaries renders and adjusts without error in the staged app.
 
 ## Verification
@@ -730,3 +730,19 @@ never add a section below it. -->
 - Watch-next: Phase 3's four acceptance criteria are all MANUAL and remain unchecked (no display
   here) — run them together with Phase 2's five. Phase 4 is self-contained in
   `_refresh_slider_gradients` (`src/iop/colorprimaries.c`) and needs no Phase 3 context.
+
+### 2026-09-21 — Phase 4: Accurate Color primaries brightness ramp
+- Done: the brightness branch of `_refresh_slider_gradients` (`src/iop/colorprimaries.c`) now sets
+  three neutral stops — saturation 0, brightness 0 / 0.5 / 1 — through the existing
+  `_set_slider_stop_from_hsb` + `dt_bauhaus_slider_set_stop` path, so the ramp reads black ->
+  grey -> white instead of the node's saturated hue. Ten lines replaced; the hue and saturation
+  branches are untouched, verified by `git diff --stat`.
+- Learned: with S = 0 that helper is already achromatic (`dt_UCS_HSB_to_XYZ` -> display profile),
+  so a neutral ramp needed no new API and no second conversion path. The defect was purely in the
+  arguments: `target_hsb[0]/[1]` fed the node's hue and saturation, and the ±0.05 brightness span
+  made the ramp nearly flat as well as tinted. Full suite re-run: 9 failures of 28, byte-identical
+  to the pre-plan baseline of 9 of 27 (the extra test is Phase 1's `test_bauhaus_draw`).
+- Drift: none.
+- Watch-next: the middle stop is 0.5 in profile space, which the display conversion does not place
+  at perceptual mid-grey; if the ramp reads top-heavy in the staged app, the tunable is the middle
+  stop, not the endpoints. All manual checks for Phases 2, 3 and 4 are still outstanding.
