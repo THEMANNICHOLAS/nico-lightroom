@@ -81,6 +81,9 @@ typedef struct
 void dt_bauhaus_draw_track(cairo_t *cr, const BhMetrics *m, const BhTrackState *s);
 void dt_bauhaus_draw_ring(cairo_t *cr, const BhMetrics *m, const BhTrackState *s);
 void dt_bauhaus_value_rect(const BhMetrics *m, int *x, int *y, int *w, int *h);
+int dt_bauhaus_value_parse(const char *text, double factor, double offset, double min,
+                           double max, double *out);
+int dt_bauhaus_value_hit(const BhMetrics *m, double x, double y);
 double dt_bauhaus_pos_to_x(const BhMetrics *m, double p);
 double dt_bauhaus_fill_x(const BhMetrics *m, double p);
 double dt_bauhaus_x_to_pos(const BhMetrics *m, double x);

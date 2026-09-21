@@ -268,6 +268,79 @@ static void _pos_x_roundtrip_and_clamp(void **state)
   assert_true(dt_bauhaus_pos_to_x(&m, 1.0) == m.width - m.inset);
 }
 
+static void _value_parse_plain_commits(void **state)
+{
+  (void)state;
+  double v = 0.0;
+  assert_int_equal(dt_bauhaus_value_parse("45", 1.0, 0.0, 0.0, 100.0, &v), 1);
+  assert_true(v == 45.0);
+}
+
+static void _value_parse_percent_display_units(void **state)
+{
+  (void)state;
+  double v = 0.0;
+
+  /* "45" is a display-unit percent: factor 100 / offset 0 maps it back to the 0..1 domain */
+  assert_int_equal(dt_bauhaus_value_parse("45", 100.0, 0.0, 0.0, 1.0, &v), 1);
+  assert_true(v > 0.45 - 1e-9 && v < 0.45 + 1e-9);
+}
+
+static void _value_parse_clamps_to_bounds(void **state)
+{
+  (void)state;
+  double v = 0.0;
+  assert_int_equal(dt_bauhaus_value_parse("-10", 1.0, 0.0, 0.0, 100.0, &v), 1);
+  assert_true(v == 0.0);
+  assert_int_equal(dt_bauhaus_value_parse("500", 1.0, 0.0, 0.0, 100.0, &v), 1);
+  assert_true(v == 100.0);
+}
+
+static void _value_parse_rejects_garbage(void **state)
+{
+  (void)state;
+
+  /* A rejected parse must leave the caller's output untouched: a sentinel proves it. */
+  const double sentinel = 1234.5;
+  double v = sentinel;
+  assert_int_equal(dt_bauhaus_value_parse("", 1.0, 0.0, 0.0, 100.0, &v), 0);
+  assert_true(v == sentinel);
+  v = sentinel;
+  assert_int_equal(dt_bauhaus_value_parse("abc", 1.0, 0.0, 0.0, 100.0, &v), 0);
+  assert_true(v == sentinel);
+  v = sentinel;
+  assert_int_equal(dt_bauhaus_value_parse("1.2.3", 1.0, 0.0, 0.0, 100.0, &v), 0);
+  assert_true(v == sentinel);
+  v = sentinel;
+  assert_int_equal(dt_bauhaus_value_parse("nan", 1.0, 0.0, 0.0, 100.0, &v), 0);
+  assert_true(v == sentinel);
+  v = sentinel;
+  assert_int_equal(dt_bauhaus_value_parse("inf", 1.0, 0.0, 0.0, 100.0, &v), 0);
+  assert_true(v == sentinel);
+}
+
+static void _value_parse_accepts_space_and_sign(void **state)
+{
+  (void)state;
+  double v = 0.0;
+  assert_int_equal(dt_bauhaus_value_parse(" +45 ", 1.0, 0.0, 0.0, 100.0, &v), 1);
+  assert_true(v == 45.0);
+  assert_int_equal(dt_bauhaus_value_parse("-3.5", 1.0, 0.0, -10.0, 10.0, &v), 1);
+  assert_true(v == -3.5);
+}
+
+static void _value_hit_value_vs_main(void **state)
+{
+  (void)state;
+  const BhMetrics m = _metrics();
+
+  /* the 200 px metrics put the value rect at x 160..200, y 3..15 */
+  assert_int_equal(dt_bauhaus_value_hit(&m, 170.0, 8.0), 1);
+  assert_int_equal(dt_bauhaus_value_hit(&m, 150.0, 8.0), 0);
+  assert_int_equal(dt_bauhaus_value_hit(&m, 170.0, 20.0), 0);
+  assert_int_equal(dt_bauhaus_value_hit(&m, 200.0, 3.0), 1);
+}
+
 int main(int argc, char **argv)
 {
   (void)argc;
@@ -280,6 +353,12 @@ int main(int argc, char **argv)
     cmocka_unit_test(_disabled_suppresses_shadow_and_halo),
     cmocka_unit_test(_value_rect_right_aligned),
     cmocka_unit_test(_pos_x_roundtrip_and_clamp),
+    cmocka_unit_test(_value_parse_plain_commits),
+    cmocka_unit_test(_value_parse_percent_display_units),
+    cmocka_unit_test(_value_parse_clamps_to_bounds),
+    cmocka_unit_test(_value_parse_rejects_garbage),
+    cmocka_unit_test(_value_parse_accepts_space_and_sign),
+    cmocka_unit_test(_value_hit_value_vs_main),
   };
   return cmocka_run_group_tests(tests, NULL, NULL);
 }

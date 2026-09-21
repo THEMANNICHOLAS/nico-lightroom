@@ -247,6 +247,13 @@ struct dt_bauhaus_t
   GtkWidget *popup_window;
   GtkWidget *popup_area;
 
+  // Inline value editor: one popover + entry shared by every slider, re-pointed to the
+  // widget being edited. Independent of the calculator popup above.
+  GtkWidget *value_popover;
+  GtkWidget *value_entry;
+  struct dt_bauhaus_widget_t *value_editing; // widget the popover is editing, NULL when closed
+  gboolean value_revert;                     // set by Escape so the close handler skips the commit
+
   // are set by the motion notification, to be used during drawing.
   float mouse_x, mouse_y;
 

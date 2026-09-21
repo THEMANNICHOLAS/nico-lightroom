@@ -108,6 +108,11 @@ static void _style_updated(GtkWidget *widget);
 static void dt_bauhaus_widget_accept(struct dt_bauhaus_widget_t *w);
 static void dt_bauhaus_widget_reject(struct dt_bauhaus_widget_t *w);
 static void _combobox_set(GtkWidget *widget, const int pos);
+static void _value_entry_activate(GtkEntry *entry, gpointer user_data);
+static gboolean _value_entry_key_press(GtkWidget *entry, GdkEventKey *event, gpointer user_data);
+static void _value_popover_closed(GtkPopover *popover, gpointer user_data);
+static void _bh_build_metrics(struct dt_bauhaus_widget_t *w, GtkWidget *widget,
+                              const double width, BhMetrics *m);
 
 // !!! EXECUTIVE NOTE !!!
 // Sizing and spacing need to be declared once only in getters/setters functions below.
@@ -319,6 +324,7 @@ typedef enum _bh_active_region_t
   BH_REGION_OUT = 0, // we are outside the padding box
   BH_REGION_MAIN,    // we are on the slider scale or combobox label/value, aka out of the quad button
   BH_REGION_QUAD,    // we are on the quad button
+  BH_REGION_VALUE,   // we are on the slider's reserved value field
 } _bh_active_region_t;
 
 /**
@@ -346,17 +352,26 @@ static _bh_active_region_t _bh_get_active_region(GtkWidget *widget, double *x, d
   if(width) *width = main_width;
   _translate_cursor(x, y, w);
 
+  // A slider's cursor arrived shifted left by half a marker (see _translate_cursor), so put
+  // it back in rail space first: the value-field hit test and the quad boundary both need it.
+  const double cursor_shift = (w->type == DT_BAUHAUS_SLIDER) ? 0.5 * w->bauhaus->marker_size : 0.0;
+
   // Check if we are within popup frame
   if(*y < 0. || *y > main_height || *x < 0. || *x > total_width)
     return BH_REGION_OUT;
 
+  // The reserved value field takes precedence over the rail, because the value's row and the
+  // rail's drag-start band overlap by a few pixels at the bottom of the label row.
+  if(w->type == DT_BAUHAUS_SLIDER)
+  {
+    BhMetrics m;
+    _bh_build_metrics(w, box_reference, main_width, &m);
+    if(dt_bauhaus_value_hit(&m, *x + cursor_shift, *y)) return BH_REGION_VALUE;
+  }
+
   // Check where we are horizontally
   // The quad now begins exactly 2*INNER_PADDING past the main area for both
   // sliders and comboboxes (see the quad draw sites), so use the same boundary.
-  // A slider's cursor arrived shifted left by half a marker (see _translate_cursor), so put
-  // it back in rail space first: without that the boundary falls half a marker inside the
-  // quad and eats the left side of its clickable area.
-  const double cursor_shift = (w->type == DT_BAUHAUS_SLIDER) ? 0.5 * w->bauhaus->marker_size : 0.0;
   if(*x + cursor_shift <= main_width + 2. * INNER_PADDING)
     return BH_REGION_MAIN;
   else
@@ -1116,6 +1131,15 @@ static void _widget_finalize(GObject *widget)
 
   if(dt_widget_scroll_focus() == GTK_WIDGET(w))
     dt_widget_set_scroll_focus(NULL);
+
+  // Popping down emits "closed": clear the pointer first so the handler cannot commit into a
+  // widget that is being destroyed.
+  if(w->bauhaus->value_editing == w)
+  {
+    w->bauhaus->value_editing = NULL;
+    gtk_popover_popdown(GTK_POPOVER(w->bauhaus->value_popover));
+  }
+
   if(w->type == DT_BAUHAUS_SLIDER)
   {
     dt_bauhaus_slider_data_t *d = &w->data.slider;
@@ -1311,6 +1335,19 @@ dt_bauhaus_t * dt_bauhaus_init()
   g_signal_connect(area, "key-press-event", G_CALLBACK(dt_bauhaus_popup_key_press), NULL);
   g_signal_connect(area, "scroll-event", G_CALLBACK(dt_bauhaus_popup_scroll), NULL);
 
+  // Inline value editor: a single popover + entry shared by every slider, re-pointed to the
+  // widget being edited at open time. Independent of the calculator popup above.
+  bauhaus->value_popover = gtk_popover_new(NULL);
+  bauhaus->value_entry = gtk_entry_new();
+  gtk_widget_set_name(bauhaus->value_entry, "bauhaus-value-entry");
+  gtk_container_add(GTK_CONTAINER(bauhaus->value_popover), bauhaus->value_entry);
+  // Stay modal (GTK's default): the input grab a modal popover takes is what dismisses it on a
+  // click outside, which is the "popdown commits" path. Non-modal, that click reaches the rail
+  // instead, starts a drag, and the close then commits the stale entry text over the dragged value.
+  g_signal_connect(bauhaus->value_entry, "activate", G_CALLBACK(_value_entry_activate), bauhaus);
+  g_signal_connect(bauhaus->value_entry, "key-press-event", G_CALLBACK(_value_entry_key_press), bauhaus);
+  g_signal_connect(bauhaus->value_popover, "closed", G_CALLBACK(_value_popover_closed), bauhaus);
+
   // Keys used by key-pressed event handler when the Bauhaus widget has the focus
   gchar *path = dt_accels_build_path(_("Darkroom/Controls/Sliders"), _("Increase value (normal step)"));
   dt_accels_new_virtual_shortcut(dt_accels_get_global(), dt_accels_get_global()->darkroom_accels,
@@ -1371,6 +1408,7 @@ dt_bauhaus_t * dt_bauhaus_init()
 
 void dt_bauhaus_cleanup(dt_bauhaus_t *bauhaus)
 {
+  if(!IS_NULL_PTR(bauhaus->value_popover)) gtk_widget_destroy(bauhaus->value_popover);
 }
 
 // fwd declare a few callbacks
@@ -2866,7 +2904,7 @@ static gboolean _widget_draw(GtkWidget *widget, cairo_t *crf)
       // The ring is drawn even when the widget is insensitive: the unit dims it itself.
       dt_bauhaus_draw_indicator(w, w->data.slider.pos, cr, available_width);
 
-      if(gtk_widget_is_sensitive(widget))
+      if(gtk_widget_is_sensitive(widget) && w->bauhaus->value_editing != w)
       {
         char *text = dt_bauhaus_slider_get_text(widget, dt_bauhaus_slider_get(widget));
         GdkRectangle bounding_value = { .x = 0.,
@@ -3607,6 +3645,53 @@ static gboolean dt_bauhaus_popup_key_press(GtkWidget *widget, GdkEventKey *event
   }
 }
 
+/** Commit site shared by Enter and click-out: read the entry, convert from display units to
+ * domain units and apply. Reverting is signalled separately by value_revert, so Enter and a
+ * click-out cannot diverge from Escape. */
+static void _value_popover_closed(GtkPopover *popover, gpointer user_data)
+{
+  dt_bauhaus_t *bh = (dt_bauhaus_t *)user_data;
+  struct dt_bauhaus_widget_t *w = bh->value_editing;
+  if(IS_NULL_PTR(w)) return;
+
+  // clear first: the commit below can emit signals that re-enter this handler
+  bh->value_editing = NULL;
+
+  if(!bh->value_revert)
+  {
+    const dt_bauhaus_slider_data_t *const d = &w->data.slider;
+    double v = 0.0;
+    if(dt_bauhaus_value_parse(gtk_entry_get_text(GTK_ENTRY(bh->value_entry)), d->factor, d->offset,
+                              d->hard_min, d->hard_max, &v))
+      dt_bauhaus_slider_set(GTK_WIDGET(w), (float)v);
+  }
+
+  bh->value_revert = FALSE;
+  gtk_widget_grab_focus(GTK_WIDGET(w));
+  gtk_widget_queue_draw(GTK_WIDGET(w));
+}
+
+/** Enter: pop down, which routes the commit through _value_popover_closed(). */
+static void _value_entry_activate(GtkEntry *entry, gpointer user_data)
+{
+  dt_bauhaus_t *bh = (dt_bauhaus_t *)user_data;
+  gtk_popover_popdown(GTK_POPOVER(bh->value_popover));
+}
+
+/** Escape: cancel. Connected on the entry so this runs before the popover's own Escape binding
+ * bubbles up, which would otherwise pop down with value_revert unset and commit a cancelled edit. */
+static gboolean _value_entry_key_press(GtkWidget *entry, GdkEventKey *event, gpointer user_data)
+{
+  dt_bauhaus_t *bh = (dt_bauhaus_t *)user_data;
+  if(event->keyval == GDK_KEY_Escape)
+  {
+    bh->value_revert = TRUE;
+    gtk_popover_popdown(GTK_POPOVER(bh->value_popover));
+    return TRUE;
+  }
+  return FALSE;
+}
+
 static gboolean dt_bauhaus_slider_button_press(GtkWidget *widget, GdkEventButton *event, gpointer user_data)
 {
   struct dt_bauhaus_widget_t *w = (struct dt_bauhaus_widget_t *)widget;
@@ -3633,7 +3718,40 @@ static gboolean dt_bauhaus_slider_button_press(GtkWidget *widget, GdkEventButton
     dt_bauhaus_widget_press_quad(widget);
     return TRUE;
   }
-  else if(activated == BH_REGION_MAIN)
+  else if(activated == BH_REGION_VALUE && event->button == 1)
+  {
+    d->is_dragging = 0;  // a value click must never start a scrub
+
+    // Open the editor over the value field. The rect is in post-translate draw space, but
+    // gtk_popover_set_pointing_to() wants widget-allocation-relative coordinates, so add back
+    // the margin + padding that _widget_draw's translate removed.
+    BhMetrics m;
+    int rx, ry, rw, rh;
+    _bh_build_metrics(w, GTK_WIDGET(w), main_width, &m);
+    dt_bauhaus_value_rect(&m, &rx, &ry, &rw, &rh);
+    rx += w->margin->left + w->padding->left;
+    ry += w->margin->top + w->padding->top;
+
+    GtkWidget *entry = w->bauhaus->value_entry;
+    const GdkRectangle rect = { rx, ry, rw, rh };
+    gtk_popover_set_relative_to(GTK_POPOVER(w->bauhaus->value_popover), widget);
+    gtk_popover_set_pointing_to(GTK_POPOVER(w->bauhaus->value_popover), &rect);
+
+    char *text = dt_bauhaus_slider_get_text(widget, dt_bauhaus_slider_get(widget));
+    gtk_entry_set_text(GTK_ENTRY(entry), text);
+    dt_free(text);
+    gtk_editable_select_region(GTK_EDITABLE(entry), 0, -1);
+
+    w->bauhaus->value_editing = w;
+    w->bauhaus->value_revert = FALSE;
+    gtk_widget_show_all(w->bauhaus->value_popover);
+    gtk_popover_popup(GTK_POPOVER(w->bauhaus->value_popover));
+    gtk_widget_grab_focus(entry);
+    return TRUE;
+  }
+  // Non-left buttons over the value field keep the rail's behaviour (right-click opens the
+  // calculator popup, middle-click resets the zoom range); button 1 already returned above.
+  else if(activated == BH_REGION_MAIN || activated == BH_REGION_VALUE)
   {
     if(event->button == 1)
     {

@@ -74,6 +74,45 @@ void dt_bauhaus_value_rect(const BhMetrics *m, int *x, int *y, int *w, int *h)
   *h = (int)m->line_h;
 }
 
+/** Parse a value typed in the entry field and convert it back to domain units.
+ *
+ * The field displays `val * factor + offset`, so the inverse mapping is applied before
+ * clamping to [min, max]. g_ascii_strtod is used instead of strtod so "1.5" keeps its
+ * meaning under a comma-decimal locale. Returns 1 on commit, 0 on reject. */
+int dt_bauhaus_value_parse(const char *text, const double factor, const double offset,
+                           const double min, const double max, double *out)
+{
+  const char *start = text;
+  while(g_ascii_isspace(*start)) start++;
+  if(*start == '\0') return 0;
+
+  char *end = NULL;
+  const double display = g_ascii_strtod(start, &end);
+  if(end == start) return 0;
+
+  // anything but whitespace after the number rejects the whole input ("1.2.3", "45abc")
+  while(g_ascii_isspace(*end)) end++;
+  if(*end != '\0') return 0;
+
+  // g_ascii_strtod yields NaN/Inf for "nan"/"inf", which must not reach the slider
+  if(!isfinite(display)) return 0;
+  if(factor == 0.0) return 0;
+
+  const double v = (display - offset) / factor;
+  *out = v < min ? min : (v > max ? max : v);
+  return 1;
+}
+
+/** True when a point in metrics space falls inside the reserved value field.
+ *
+ * Edges are inclusive so the field's right edge belongs to the value, not to the rail. */
+int dt_bauhaus_value_hit(const BhMetrics *m, const double x, const double y)
+{
+  int rx, ry, rw, rh;
+  dt_bauhaus_value_rect(m, &rx, &ry, &rw, &rh);
+  return x >= rx && x <= rx + rw && y >= ry && y <= ry + rh;
+}
+
 /** Draw the recessed rail and whatever fills it.
  *
  * Order is load-bearing: the rounded rail background is filled, then kept current as the clip

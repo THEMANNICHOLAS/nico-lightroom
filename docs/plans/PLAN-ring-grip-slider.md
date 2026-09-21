@@ -226,7 +226,7 @@ Draw rules:
 ## Progress
 - [x] Phase 1: Raster core — `bauhaus_draw` unit
 - [x] Phase 2: Wire the ring-grip restyle into `bauhaus.c` and the theme
-- [ ] Phase 3: Inline value editor via a `GtkPopover`
+- [x] Phase 3: Inline value editor via a `GtkPopover`
 - [ ] Phase 4: Accurate Color primaries brightness ramp
 - [ ] Final verification
 
@@ -630,6 +630,16 @@ default cairo CTM while `show_pango_text` draws under `dt_cairo_surface_create_a
 chain cannot be settled read-only. → The Phase 2 manual check on a non-1.0 display scale
 (value not clipped or overlapping) is the test; if it fails, scale the measurement by `dt_widget_ppd()`.
 
+2026-09-21 — Phase 3 (**deferred**): `dt_bauhaus_value_rect` returns `y = BH_PAD` (3) while the
+value text is drawn at `y = 0` inside a `line_height`-tall box (`bauhaus.c:2872-2878`, since
+`show_pango_text` uses `bounding_box->y` directly), so the value hit rect sits 3 px below the
+visible number. The top 3 px of the number lands in the no-op header branch, and the 3 px of rect
+below the text falls in the dead band between the label row and the rail (rail top = `BH_PAD +
+line_h + BH_GAP` = 23), so no drag area is stolen — it is a misalignment, not a hijack.
+→ Deferred: fixing it means either moving the label/value draw to `y = BH_PAD` (a Phase 2 visual
+change to a layout whose manual checks are still unrun) or changing the Phase 1 rect and its
+pinned `y = 3` test. Decide after the Phase 2 manual checks.
+
 ## Phase Handoff Log
 <!-- Written by /implement at each 3G phase gate (Done / Learned / Drift / Watch-next per
 phase). Append-only, empty at plan creation. MUST remain the LAST section of this file:
@@ -692,3 +702,31 @@ never add a section below it. -->
   width, and the right-click calculator popup. Phase 3 must add `BH_REGION_VALUE` to
   `_bh_active_region_t` and test it **before** `BH_REGION_MAIN` in `_bh_get_active_region`, where
   the new `cursor_shift` expression now sits — and must not touch the popup or its input grab.
+
+### 2026-09-21 — Phase 3: Inline value editor via a `GtkPopover`
+- Done: `dt_bauhaus_value_parse` / `dt_bauhaus_value_hit` added to the `bauhaus_draw` unit with
+  six red-first tests (13/13 green); `BH_REGION_VALUE` added to `_bh_active_region_t` and tested
+  before `BH_REGION_MAIN`, with the slider's half-marker cursor shift added back before the hit
+  test; one `GtkPopover` + `GtkEntry` on `dt_bauhaus_t` (`value_popover`, `value_entry`,
+  `value_editing`, `value_revert`), opened from a value click, committed on the popover's
+  `"closed"` signal (Enter and click-out share that single commit site), reverted on Escape
+  (caught on the entry so the flag is set before the popover's own binding bubbles);
+  `#bauhaus-value-entry` CSS block.
+- Learned: (1) the popover must stay **modal** — GTK's input grab is what dismisses it on an
+  outside click, and the non-modal idiom it was first written with (copied from `popup.c:115`, a
+  menu-button popover that is dismissed by its toggle instead) silently broke "popdown commits"
+  *and* let the outside click through to the rail, where the eventual close committed stale entry
+  text over the value the user had just dragged. D1 was right and the impl plan's step 5 was the
+  wrong part, so no durable-plan text needed amending. (2) Over the value field, non-left buttons
+  must fall through to the `BH_REGION_MAIN` branch, or right-click (calculator popup) and
+  middle-click (zoom reset) die there. (3) `gtk_entry_select_region` is unavailable under
+  `GTK_DISABLE_DEPRECATED`; the tree's idiom is `gtk_editable_select_region`
+  (`src/libs/tagging.c:3625`). (4) `ctest -R <name>` alone can report a **false pass**: when ninja
+  stops on a compile error it never relinks, so ctest runs the previous executable — always check
+  the build's exit code first. (5) Ninja's per-target POST_BUILD copies of the same
+  `libansel.dll` into `build/tests/unittests` race under `-j`: a rebuild can fail with
+  `Permission denied` on two unrelated test targets and then succeed on an identical re-run.
+- Drift: none. One deferred Discovery logged above (the 3 px value-rect / drawn-row offset).
+- Watch-next: Phase 3's four acceptance criteria are all MANUAL and remain unchecked (no display
+  here) — run them together with Phase 2's five. Phase 4 is self-contained in
+  `_refresh_slider_gradients` (`src/iop/colorprimaries.c`) and needs no Phase 3 context.

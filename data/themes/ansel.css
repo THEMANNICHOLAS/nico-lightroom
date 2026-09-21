@@ -1017,6 +1017,15 @@ filechooser .sidebar-label {
   padding: 0.42em;
 }
 
+/* Inline value editor: keep the inherited font size, just reserve room for a unit-suffixed
+ * value and match the flat theme corners. */
+#bauhaus-value-entry {
+  min-width: 7em;
+  padding-left: 0.35em;
+  padding-right: 0.35em;
+  border-radius: 0;
+}
+
 .dt_bauhaus_popup {
   color: shade(@fg_color, 0.9);
   padding: 0.42em 0 0 0.42em;
