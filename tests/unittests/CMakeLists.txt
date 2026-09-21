@@ -57,6 +57,7 @@ set(LIB_ANSEL_UNIT_TESTS
   test_paint_module_switch
   test_colorwheel
   test_colorrings_display
+  test_bauhaus_draw
 )
 
 foreach(test ${LIB_ANSEL_UNIT_TESTS})
