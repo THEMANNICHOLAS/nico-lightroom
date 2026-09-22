@@ -65,12 +65,17 @@ double dt_bauhaus_x_to_pos(const BhMetrics *m, const double x)
   return p < 0.0 ? 0.0 : (p > 1.0 ? 1.0 : p);
 }
 
-/** Right-aligned integer rectangle reserved for the value field. */
+/** Right-aligned integer rectangle reserved for the value field.
+ *
+ * The field is reserved, so it can only exist where the rail is wider than it: when the measured
+ * value string does not fit, an empty rect at the rail's right edge is reported instead of one
+ * that starts left of the rail. y and h stay pinned to the label row. */
 void dt_bauhaus_value_rect(const BhMetrics *m, int *x, int *y, int *w, int *h)
 {
-  *x = (int)(m->width - m->value_w);
+  const int fits = m->value_w < m->width;
+  *x = fits ? (int)(m->width - m->value_w) : (int)m->width;
   *y = (int)BH_PAD;
-  *w = (int)m->value_w;
+  *w = fits ? (int)m->value_w : 0;
   *h = (int)m->line_h;
 }
 
@@ -105,9 +110,12 @@ int dt_bauhaus_value_parse(const char *text, const double factor, const double o
 
 /** True when a point in metrics space falls inside the reserved value field.
  *
- * Edges are inclusive so the field's right edge belongs to the value, not to the rail. */
+ * Edges are inclusive so the field's right edge belongs to the value, not to the rail. A rail that
+ * cannot carry a reserved field has no value region at all, so the parameter name keeps its no-op
+ * click behaviour. */
 int dt_bauhaus_value_hit(const BhMetrics *m, const double x, const double y)
 {
+  if(m->value_w >= m->width) return 0;
   int rx, ry, rw, rh;
   dt_bauhaus_value_rect(m, &rx, &ry, &rw, &rh);
   return x >= rx && x <= rx + rw && y >= ry && y <= ry + rh;
@@ -143,7 +151,7 @@ void dt_bauhaus_draw_track(cairo_t *cr, const BhMetrics *m, const BhTrackState *
     cairo_fill(cr);
     cairo_pattern_destroy(pattern);
   }
-  else
+  else if(s->fill_feedback)
   {
     /* bipolar fill: grows from the origin towards the current value */
     const double x0 = dt_bauhaus_fill_x(m, s->origin);

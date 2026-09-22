@@ -70,6 +70,7 @@ typedef struct
   double origin; /* 0..1, where the bipolar fill grows from */
   int disabled;
   int hot;                /* pointer over the track, or dragging */
+  int fill_feedback;      /* 0 => the caller disabled the bipolar fill (see dt_bauhaus_slider_set_feedback) */
   int grad_cnt;           /* > 0 => draw the ramp instead of the bipolar fill */
   const BhGradStop *grad; /* grad_cnt stops */
   const GdkRGBA *fill;    /* bipolar fill colour */

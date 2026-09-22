@@ -584,6 +584,16 @@ correction. Empty at plan creation. -->
   design demo and are settled in `docs/plans/.impl/PLAN-ring-grip-slider-phase-1.md`.
 - No requirements-level change; the design intent is unchanged.
 
+### 2026-09-21 — PR #116 review fix: bipolar fill opt-out restored, value rect clamped
+- **Authoritative field list adds `int fill_feedback`** to `BhTrackState`. The restyle replaced the
+  bipolar fill's `!has_colored_background && d->fill_feedback && is_sensitive` guard with an
+  unconditional fill whenever `grad_cnt == 0`, so a slider that disabled its fill through the public
+  `dt_bauhaus_slider_set_feedback(widget, 0)` silently regained it. The flag is carried into the unit
+  from `_bh_build_state` and the `grad_cnt == 0` branch only paints the fill when it is set.
+- `dt_bauhaus_value_rect` and `dt_bauhaus_value_hit` are now clamped so a rail narrower than the
+  measured value string has no value region (m4). This is a behaviour fix, not a design change.
+- No requirements-level change; the design intent is unchanged.
+
 ## Discoveries
 <!-- Non-contradictory findings logged by /implement during execution (act / defer / drop).
 Append-only, empty at plan creation. -->
@@ -633,12 +643,15 @@ chain cannot be settled read-only. → The Phase 2 manual check on a non-1.0 dis
 2026-09-21 — Phase 3 (**deferred**): `dt_bauhaus_value_rect` returns `y = BH_PAD` (3) while the
 value text is drawn at `y = 0` inside a `line_height`-tall box (`bauhaus.c:2872-2878`, since
 `show_pango_text` uses `bounding_box->y` directly), so the value hit rect sits 3 px below the
-visible number. The top 3 px of the number lands in the no-op header branch, and the 3 px of rect
-below the text falls in the dead band between the label row and the rail (rail top = `BH_PAD +
-line_h + BH_GAP` = 23), so no drag area is stolen — it is a misalignment, not a hijack.
-→ Deferred: fixing it means either moving the label/value draw to `y = BH_PAD` (a Phase 2 visual
-change to a layout whose manual checks are still unrun) or changing the Phase 1 rect and its
-pinned `y = 3` test. Decide after the Phase 2 manual checks.
+visible number. The top 3 px of the number lands in the no-op header branch. **Correction:** the
+original claim that the 3 px of rect below the text "falls in the dead band ... so no drag area is
+stolen" is false. The single-left-click scrub branch starts at `event_y >= line_h`
+(`bauhaus.c:3781`), not at the rail top, so `y ∈ [line_h, BH_PAD + line_h]` in the value column
+*was* drag area and now opens the editor. The offset is therefore a real behaviour change for the
+bottom ~3 px of the value column.
+→ Deferred and still OPEN, owned by the developer: the deliberate choice is between moving the
+label/value draw to `y = BH_PAD` (a Phase 2 visual change to a layout whose manual checks are still
+unrun) and raising the scrub threshold to the rail top. Neither option has been picked.
 
 2026-09-21 — PR #116 review fixes (M1/M2/M3): Phase 4's "Learned" note — "with S = 0 that helper is
 already achromatic" — holds for the mid and white stops but NOT at brightness 0, where

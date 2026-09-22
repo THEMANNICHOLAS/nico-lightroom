@@ -2324,6 +2324,7 @@ static void _bh_build_state(struct dt_bauhaus_widget_t *w, const float pos,
   s->disabled = !gtk_widget_is_sensitive(GTK_WIDGET(w));
   s->hot = (gtk_widget_get_state_flags(GTK_WIDGET(w)) & GTK_STATE_FLAG_PRELIGHT) != 0
            || d->is_dragging;
+  s->fill_feedback = d->fill_feedback;
   s->grad_cnt = d->grad_cnt;
   for(int k = 0; k < d->grad_cnt; k++)
   {

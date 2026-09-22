@@ -90,6 +90,9 @@ static void _state(BhTrackState *s, const double frac, const double origin)
   memset(s, 0, sizeof(BhTrackState));
   s->frac = frac;
   s->origin = origin;
+  /* Matches bauhaus.c:1697, where the widget is created with feedback = 1; a zeroed struct would
+   * silently disable the fill and change what the fill assertions prove. */
+  s->fill_feedback = 1;
   s->fill = &FILL;
   s->ring = &RING;
   s->ring_hover = &WHITE;
@@ -147,6 +150,27 @@ static void _unipolar_max_fills_both_ends(void **state)
   cairo_surface_t *half = _render(dt_bauhaus_draw_track, &m, &s);
   assert_int_equal(_pixel(half, BOX_W - 4, (int)m.track_cy) & 0x00FFFFFF, 0);
   cairo_surface_destroy(half);
+}
+
+static void _fill_feedback_off_suppresses_bipolar_fill(void **state)
+{
+  (void)state;
+  const BhMetrics m = _metrics();
+  BhTrackState s;
+
+  /* frac != origin and no ramp: without fill_feedback the bipolar fill must not be painted,
+   * only the recessed rail background is left */
+  _state(&s, 1.0, 0.5);
+  s.fill_feedback = 0;
+  cairo_surface_t *off = _render(dt_bauhaus_draw_track, &m, &s);
+  assert_int_equal(_pixel(off, 150, (int)m.track_cy) & 0x00FFFFFF, 0);
+  cairo_surface_destroy(off);
+
+  /* control: the same geometry with the fill enabled paints opaque @orange_dark */
+  _state(&s, 1.0, 0.5);
+  cairo_surface_t *on = _render(dt_bauhaus_draw_track, &m, &s);
+  assert_int_equal(_pixel(on, 150, (int)m.track_cy), 0xFFBF8000);
+  cairo_surface_destroy(on);
 }
 
 static void _gradient_ramp_clipped_and_through_ring(void **state)
@@ -250,6 +274,33 @@ static void _value_rect_right_aligned(void **state)
   assert_int_equal(x + w, (int)m.width);
 }
 
+static void _value_rect_clamped_when_it_does_not_fit(void **state)
+{
+  (void)state;
+  BhMetrics m = _metrics();
+  int x, y, w, h;
+
+  /* a value string wider than the rail: empty rect at the rail's right edge, no value region
+   * anywhere in the row, including the rail's left edge */
+  m.value_w = 250.0;
+  dt_bauhaus_value_rect(&m, &x, &y, &w, &h);
+  assert_int_equal(x, (int)m.width);
+  assert_int_equal(y, (int)BH_PAD);
+  assert_int_equal(w, 0);
+  assert_int_equal(h, 12);
+  assert_int_equal(dt_bauhaus_value_hit(&m, 0.0, 8.0), 0);
+  assert_int_equal(dt_bauhaus_value_hit(&m, 100.0, 8.0), 0);
+  assert_int_equal(dt_bauhaus_value_hit(&m, 170.0, 8.0), 0);
+
+  /* value_w == width is also no room: the whole row belongs to the rail */
+  m.value_w = m.width;
+  dt_bauhaus_value_rect(&m, &x, &y, &w, &h);
+  assert_int_equal(x, (int)m.width);
+  assert_int_equal(w, 0);
+  assert_int_equal(dt_bauhaus_value_hit(&m, 0.0, 8.0), 0);
+  assert_int_equal(dt_bauhaus_value_hit(&m, BOX_W, 8.0), 0);
+}
+
 static void _pos_x_roundtrip_and_clamp(void **state)
 {
   (void)state;
@@ -348,10 +399,12 @@ int main(int argc, char **argv)
   const struct CMUnitTest tests[] = {
     cmocka_unit_test(_zero_fill_draws_no_fill),
     cmocka_unit_test(_unipolar_max_fills_both_ends),
+    cmocka_unit_test(_fill_feedback_off_suppresses_bipolar_fill),
     cmocka_unit_test(_gradient_ramp_clipped_and_through_ring),
     cmocka_unit_test(_disabled_ring_is_35pct_white),
     cmocka_unit_test(_disabled_suppresses_shadow_and_halo),
     cmocka_unit_test(_value_rect_right_aligned),
+    cmocka_unit_test(_value_rect_clamped_when_it_does_not_fit),
     cmocka_unit_test(_pos_x_roundtrip_and_clamp),
     cmocka_unit_test(_value_parse_plain_commits),
     cmocka_unit_test(_value_parse_percent_display_units),
