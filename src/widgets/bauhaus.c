@@ -111,8 +111,7 @@ static void _combobox_set(GtkWidget *widget, const int pos);
 static void _value_entry_activate(GtkEntry *entry, gpointer user_data);
 static gboolean _value_entry_key_press(GtkWidget *entry, GdkEventKey *event, gpointer user_data);
 static void _value_popover_closed(GtkPopover *popover, gpointer user_data);
-static void _bh_build_metrics(struct dt_bauhaus_widget_t *w, GtkWidget *widget,
-                              const double width, BhMetrics *m);
+static void _bh_build_metrics(struct dt_bauhaus_widget_t *w, const double width, BhMetrics *m);
 
 // !!! EXECUTIVE NOTE !!!
 // Sizing and spacing need to be declared once only in getters/setters functions below.
@@ -365,7 +364,7 @@ static _bh_active_region_t _bh_get_active_region(GtkWidget *widget, double *x, d
   if(w->type == DT_BAUHAUS_SLIDER)
   {
     BhMetrics m;
-    _bh_build_metrics(w, box_reference, main_width, &m);
+    _bh_build_metrics(w, main_width, &m);
     if(dt_bauhaus_value_hit(&m, *x + cursor_shift, *y)) return BH_REGION_VALUE;
   }
 
@@ -2295,15 +2294,14 @@ static float _slider_value_width(struct dt_bauhaus_widget_t *w, GtkWidget *widge
 }
 
 /** Populate the raster metrics. `width` is the rail width in content coordinates. */
-static void _bh_build_metrics(struct dt_bauhaus_widget_t *w, GtkWidget *widget,
-                              const double width, BhMetrics *m)
+static void _bh_build_metrics(struct dt_bauhaus_widget_t *w, const double width, BhMetrics *m)
 {
   m->line_h = w->bauhaus->line_height;
   m->track_cy = _get_indicator_y_position(w);
   m->track_top = m->track_cy - BH_BASELINE / 2.0;
   m->inset = BH_MARKER / 2.0;
   m->width = width;
-  m->value_w = _slider_value_width(w, widget);
+  m->value_w = _slider_value_width(w, GTK_WIDGET(w));
 }
 
 /** Populate the draw state. @p stops is caller-owned scratch for at most
@@ -2346,7 +2344,7 @@ static void dt_bauhaus_draw_indicator(struct dt_bauhaus_widget_t *w, float pos, 
   BhMetrics m;
   BhTrackState s;
   BhGradStop stops[DT_BAUHAUS_SLIDER_MAX_STOPS];
-  _bh_build_metrics(w, GTK_WIDGET(w), wd, &m);
+  _bh_build_metrics(w, wd, &m);
   _bh_build_state(w, pos, stops, &s);
   dt_bauhaus_draw_ring(cr, &m, &s);
 }
@@ -2394,7 +2392,7 @@ static void dt_bauhaus_draw_baseline(struct dt_bauhaus_widget_t *w, cairo_t *cr,
   BhMetrics m;
   BhTrackState s;
   BhGradStop stops[DT_BAUHAUS_SLIDER_MAX_STOPS];
-  _bh_build_metrics(w, GTK_WIDGET(w), width, &m);
+  _bh_build_metrics(w, width, &m);
   _bh_build_state(w, w->data.slider.pos, stops, &s);
   dt_bauhaus_draw_track(cr, &m, &s);
 }
@@ -3727,7 +3725,7 @@ static gboolean dt_bauhaus_slider_button_press(GtkWidget *widget, GdkEventButton
     // the margin + padding that _widget_draw's translate removed.
     BhMetrics m;
     int rx, ry, rw, rh;
-    _bh_build_metrics(w, GTK_WIDGET(w), main_width, &m);
+    _bh_build_metrics(w, main_width, &m);
     dt_bauhaus_value_rect(&m, &rx, &ry, &rw, &rh);
     rx += w->margin->left + w->padding->left;
     ry += w->margin->top + w->padding->top;
@@ -3737,9 +3735,24 @@ static gboolean dt_bauhaus_slider_button_press(GtkWidget *widget, GdkEventButton
     gtk_popover_set_relative_to(GTK_POPOVER(w->bauhaus->value_popover), widget);
     gtk_popover_set_pointing_to(GTK_POPOVER(w->bauhaus->value_popover), &rect);
 
-    char *text = dt_bauhaus_slider_get_text(widget, dt_bauhaus_slider_get(widget));
-    gtk_entry_set_text(GTK_ENTRY(entry), text);
-    dt_free(text);
+    // Seed with a bare, locale-independent number: the entry is a plain numeric field, and
+    // dt_bauhaus_value_parse() rejects any trailing suffix (the display format's "%", " EV",
+    // ...) as well as a comma decimal separator. g_ascii_formatd() always emits '.', matching
+    // the parser's g_ascii_strtod(), and the sign flag mirrors dt_bauhaus_slider_get_text() so
+    // a range straddling zero still shows the leading '+'.
+    char text[64];
+    char format[16];
+    const gboolean signed_range
+        = (d->hard_max * d->factor + d->offset) * (d->hard_min * d->factor + d->offset) < 0;
+    g_snprintf(format, sizeof(format), signed_range ? "%+.%df" : "%.%df", d->digits);
+    // A formatting failure must leave nothing committable behind: an empty field is rejected by
+    // dt_bauhaus_value_parse(), whereas a stale value left from a previously edited slider would
+    // be committed to this one.
+    gtk_entry_set_text(GTK_ENTRY(entry),
+                       IS_NULL_PTR(g_ascii_formatd(text, sizeof(text), format,
+                                                   dt_bauhaus_slider_get_val(widget)))
+                           ? ""
+                           : text);
     gtk_editable_select_region(GTK_EDITABLE(entry), 0, -1);
 
     w->bauhaus->value_editing = w;
@@ -3777,7 +3790,7 @@ static gboolean dt_bauhaus_slider_button_press(GtkWidget *widget, GdkEventButton
           // _translate_cursor() reduced x by the marker radius; undo it to land back in rail
           // space, then map through the unit so the ring lands under the cursor.
           BhMetrics m;
-          _bh_build_metrics(w, GTK_WIDGET(w), main_width, &m);
+          _bh_build_metrics(w, main_width, &m);
           dt_bauhaus_slider_set_normalized(w, dt_bauhaus_x_to_pos(&m, event_x + 0.5 * w->bauhaus->marker_size), FALSE);
         }
       }
@@ -3815,7 +3828,7 @@ static gboolean dt_bauhaus_slider_button_release(GtkWidget *widget, GdkEventButt
     if(event->button == 1)
     {
       BhMetrics m;
-      _bh_build_metrics(w, GTK_WIDGET(w), _widget_get_main_width(w, NULL, NULL), &m);
+      _bh_build_metrics(w, _widget_get_main_width(w, NULL, NULL), &m);
       dt_bauhaus_slider_set_normalized(w, dt_bauhaus_x_to_pos(&m, w->bauhaus->mouse_x + 0.5 * w->bauhaus->marker_size), TRUE);
       return TRUE;
     }
@@ -3839,7 +3852,7 @@ static gboolean dt_bauhaus_slider_motion_notify(GtkWidget *widget, GdkEventMotio
     w->bauhaus->mouse_x = event_x;
     w->bauhaus->mouse_y = event_y;
     BhMetrics m;
-    _bh_build_metrics(w, GTK_WIDGET(w), main_width, &m);
+    _bh_build_metrics(w, main_width, &m);
     dt_bauhaus_slider_set_normalized(w, dt_bauhaus_x_to_pos(&m, event_x + 0.5 * w->bauhaus->marker_size), TRUE);
   }
 

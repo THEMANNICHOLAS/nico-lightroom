@@ -640,6 +640,17 @@ line_h + BH_GAP` = 23), so no drag area is stolen — it is a misalignment, not 
 change to a layout whose manual checks are still unrun) or changing the Phase 1 rect and its
 pinned `y = 3` test. Decide after the Phase 2 manual checks.
 
+2026-09-21 — PR #116 review fixes (M1/M2/M3): Phase 4's "Learned" note — "with S = 0 that helper is
+already achromatic" — holds for the mid and white stops but NOT at brightness 0, where
+`dt_UCS_JCH_to_xyY` evaluates `0/0` because both the chroma and the lightness are zero, so the black
+stop was NaN. The brightness stops therefore moved to `_set_slider_stop_from_profile_rgb()` with the
+plan's own literal `{0,0,0}` / `{0.5,0.5,0.5}` / `{1,1,1}`, which also makes the Phase 4 contract
+text and the code agree. The inline editor now seeds a bare, locale-independent number
+(`g_ascii_formatd`) instead of `dt_bauhaus_slider_get_text()`'s suffixed output, so the field is
+plain numeric by design and both the suffix and the comma-decimal rejection are gone. Finally,
+`_bh_build_metrics` no longer takes a widget parameter, because it was being handed the popup window
+on the `_popup_coordinates` path.
+
 ## Phase Handoff Log
 <!-- Written by /implement at each 3G phase gate (Done / Learned / Drift / Watch-next per
 phase). Append-only, empty at plan creation. MUST remain the LAST section of this file:

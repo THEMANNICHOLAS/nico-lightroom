@@ -1085,13 +1085,13 @@ static void _refresh_slider_gradients(dt_iop_module_t *self)
       _set_slider_stop_from_profile_rgb(g->node_saturation[node], 1.f, shell_rgb, lut_profile, display_profile);
     }
 
-    /* Brightness edits a neutral luminance axis, so painting its ramp in the node's saturated
-     * hue misrepresents the parameter. Zero saturation keeps the same HSB -> display conversion
-     * as the hue and saturation siblings while making the ramp black -> grey -> white. */
+    /* Brightness edits a neutral luminance axis, so build its ramp as literal profile RGB
+     * black -> grey -> white. The HSB path is unusable at the black stop: with zero chroma
+     * and zero lightness, dt_UCS_JCH_to_xyY evaluates 0/0 and fills the stop with NaN. */
     dt_bauhaus_slider_clear_stops(g->node_brightness[node]);
-    _set_slider_stop_from_hsb(g->node_brightness[node], 0.f, (dt_aligned_pixel_t){ 0.f, 0.f, 0.f, 0.f }, display_profile);
-    _set_slider_stop_from_hsb(g->node_brightness[node], 0.5f, (dt_aligned_pixel_t){ 0.f, 0.f, 0.5f, 0.f }, display_profile);
-    _set_slider_stop_from_hsb(g->node_brightness[node], 1.f, (dt_aligned_pixel_t){ 0.f, 0.f, 1.f, 0.f }, display_profile);
+    _set_slider_stop_from_profile_rgb(g->node_brightness[node], 0.f, (dt_aligned_pixel_t){ 0.f, 0.f, 0.f, 0.f }, lut_profile, display_profile);
+    _set_slider_stop_from_profile_rgb(g->node_brightness[node], 0.5f, (dt_aligned_pixel_t){ 0.5f, 0.5f, 0.5f, 0.f }, lut_profile, display_profile);
+    _set_slider_stop_from_profile_rgb(g->node_brightness[node], 1.f, (dt_aligned_pixel_t){ 1.f, 1.f, 1.f, 0.f }, lut_profile, display_profile);
 
     /* The three sliders in one color node share the same edited hue, saturation
      * and brightness. A drag redraws the active slider through GTK events, but
