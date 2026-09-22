@@ -101,7 +101,6 @@ int dt_bauhaus_value_parse(const char *text, const double factor, const double o
 
   // g_ascii_strtod yields NaN/Inf for "nan"/"inf", which must not reach the slider
   if(!isfinite(display)) return 0;
-  if(factor == 0.0) return 0;
 
   const double v = (display - offset) / factor;
   *out = v < min ? min : (v > max ? max : v);

@@ -2306,7 +2306,8 @@ static void _bh_build_metrics(struct dt_bauhaus_widget_t *w, const double width,
 
 /** Populate the draw state. @p stops is caller-owned scratch for at most
  * DT_BAUHAUS_SLIDER_MAX_STOPS ramps, whose positions are renormalized from the stored
- * hard-range mapping into the unit's 0..1 display space. */
+ * hard-range mapping into the unit's 0..1 display space; pass NULL when the caller does
+ * not draw the ramp. */
 static void _bh_build_state(struct dt_bauhaus_widget_t *w, const float pos,
                             BhGradStop *stops, BhTrackState *s)
 {
@@ -2325,15 +2326,18 @@ static void _bh_build_state(struct dt_bauhaus_widget_t *w, const float pos,
   s->hot = (gtk_widget_get_state_flags(GTK_WIDGET(w)) & GTK_STATE_FLAG_PRELIGHT) != 0
            || d->is_dragging;
   s->fill_feedback = d->fill_feedback;
-  s->grad_cnt = d->grad_cnt;
-  for(int k = 0; k < d->grad_cnt; k++)
+  if(!IS_NULL_PTR(stops))
   {
-    stops[k].pos = (d->grad_pos[k] - offset) / zoom;
-    stops[k].r = d->grad_col[k][0];
-    stops[k].g = d->grad_col[k][1];
-    stops[k].b = d->grad_col[k][2];
+    s->grad_cnt = d->grad_cnt;
+    for(int k = 0; k < d->grad_cnt; k++)
+    {
+      stops[k].pos = (d->grad_pos[k] - offset) / zoom;
+      stops[k].r = d->grad_col[k][0];
+      stops[k].g = d->grad_col[k][1];
+      stops[k].b = d->grad_col[k][2];
+    }
+    s->grad = stops;
   }
-  s->grad = stops;
   s->fill = &w->bauhaus->color_value;
   s->ring = &w->bauhaus->indicator_border;
   s->ring_hover = &_bh_ring_hover;
@@ -2344,9 +2348,9 @@ static void dt_bauhaus_draw_indicator(struct dt_bauhaus_widget_t *w, float pos, 
 {
   BhMetrics m;
   BhTrackState s;
-  BhGradStop stops[DT_BAUHAUS_SLIDER_MAX_STOPS];
   _bh_build_metrics(w, wd, &m);
-  _bh_build_state(w, pos, stops, &s);
+  /* the ring wrapper never reads the ramp: skip the stop mapping */
+  _bh_build_state(w, pos, NULL, &s);
   dt_bauhaus_draw_ring(cr, &m, &s);
 }
 

@@ -29,6 +29,7 @@
 #include "widgets/bauhaus_draw.h"
 
 #include <cairo.h>
+#include <math.h>
 #include <setjmp.h>
 #include <stdarg.h>
 #include <stddef.h>
@@ -200,6 +201,43 @@ static void _gradient_ramp_clipped_and_through_ring(void **state)
 
   /* the ramp is clipped to the rail: nothing is painted above it */
   assert_int_equal(_alpha(surface, 40, (int)m.track_top - 3), 0);
+  cairo_surface_destroy(surface);
+}
+
+static void _origin_notch_drawn_above_the_rail(void **state)
+{
+  (void)state;
+  const BhMetrics m = _metrics();
+  BhTrackState s;
+
+  /* origin strictly inside 0..1, the only range where the notch exists; frac differs from it so
+   * the fill is drawn too, but the fill is clipped to the rail and never reaches the sampled row */
+  _state(&s, 0.5, 0.25);
+  cairo_surface_t *surface = _render(dt_bauhaus_draw_track, &m, &s);
+
+  /* the notch is a 1 px white line at round(pos_to_x(origin)) + 0.5, overshooting the rail top
+   * by BH_NOTCH_OVER. Its upper overshoot covers the rail-free row between track_top - BH_NOTCH_OVER
+   * and track_top, so that row isolates the notch from the rail and the fill. */
+  const int notch_x = (int)round(dt_bauhaus_pos_to_x(&m, s.origin));
+  const int notch_y = (int)m.track_top - 1;
+  const int above_y = (int)(m.track_top - BH_NOTCH_OVER) - 1;
+
+  /* the notch pixel exists and is white at BH_NOTCH_ALPHA (premultiplied: r = g = b = alpha) */
+  const uint32_t notch = _pixel(surface, notch_x, notch_y);
+  assert_in_range((int)(notch >> 24), 70, 84); /* 0.30 x 255 = 77 */
+  const int nr = (int)((notch >> 16) & 0xFF);
+  const int ng = (int)((notch >> 8) & 0xFF);
+  const int nb = (int)(notch & 0xFF);
+  assert_true(_near(nr, ng));
+  assert_true(_near(ng, nb));
+  assert_true(_near(nr, nb));
+
+  /* the overshoot is bounded: one row above its upper end nothing is painted */
+  assert_int_equal(_alpha(surface, notch_x, above_y), 0);
+
+  /* the notch is local: the same row, between the fill and the rail's right end, is untouched */
+  assert_int_equal(_alpha(surface, (int)dt_bauhaus_pos_to_x(&m, 0.75), notch_y), 0);
+
   cairo_surface_destroy(surface);
 }
 
@@ -401,6 +439,7 @@ int main(int argc, char **argv)
     cmocka_unit_test(_unipolar_max_fills_both_ends),
     cmocka_unit_test(_fill_feedback_off_suppresses_bipolar_fill),
     cmocka_unit_test(_gradient_ramp_clipped_and_through_ring),
+    cmocka_unit_test(_origin_notch_drawn_above_the_rail),
     cmocka_unit_test(_disabled_ring_is_35pct_white),
     cmocka_unit_test(_disabled_suppresses_shadow_and_halo),
     cmocka_unit_test(_value_rect_right_aligned),
