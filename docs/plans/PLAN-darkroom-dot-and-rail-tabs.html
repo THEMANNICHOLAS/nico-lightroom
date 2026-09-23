@@ -1,0 +1,209 @@
+<!DOCTYPE html>
+<html lang="en"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Darkroom enable dot and rail tabs — review</title>
+<style>
+:root{
+  --bg:#f5f6f8; --panel:#ffffff; --ink:#1d2330; --muted:#5d6678; --line:#e3e6ec;
+  --mono:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;
+  --sans:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;
+  --flag:#b45309; --flag-bg:#fef3e2; --ok:#15803d; --done:#15803d; --link:#2563eb;
+}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--ink);font-family:var(--sans);
+  font-size:15px;line-height:1.55}
+.wrap{display:grid;grid-template-columns:260px 1fr;min-height:100vh}
+code{font-family:var(--mono);font-size:.86em;background:#eef0f4;padding:1px 5px;border-radius:4px}
+pre{background:#1d2330;color:#e8eaf0;padding:14px 16px;border-radius:8px;overflow:auto}
+pre code{background:none;color:inherit;padding:0}
+table{border-collapse:collapse;width:100%;margin:8px 0;font-size:.92em}
+th,td{border:1px solid var(--line);padding:6px 10px;text-align:left}
+th{background:#eef0f4}
+
+/* left rail */
+.rail{position:sticky;top:0;align-self:start;height:100vh;overflow:auto;
+  background:var(--panel);border-right:1px solid var(--line);padding:20px 18px}
+.rail h1{font-size:17px;margin:0 0 2px;line-height:1.25}
+.rail .meta{font-family:var(--mono);font-size:11.5px;color:var(--muted);margin-bottom:16px}
+.progress{margin:14px 0 18px}
+.bar{height:8px;background:var(--line);border-radius:99px;overflow:hidden}
+.bar>i{display:block;height:100%;background:var(--done)}
+.progress .lab{font-size:12px;color:var(--muted);margin-top:6px}
+.stats{display:flex;flex-wrap:wrap;gap:6px;margin-bottom:18px}
+.stat{font-family:var(--mono);font-size:11px;border:1px solid var(--line);
+  border-radius:6px;padding:3px 7px;color:var(--muted)}
+.stat.flag{color:var(--flag);border-color:#f0d3a8;background:var(--flag-bg)}
+.nav a{display:block;text-decoration:none;color:var(--ink);padding:7px 9px;border-radius:7px;
+  font-size:13px;border-left:3px solid transparent}
+.nav a:hover{background:#f0f2f6}
+.nav a.flag{border-left-color:var(--flag)}
+.nav .nname{color:var(--muted)}
+
+/* content */
+.main{padding:34px 44px;max-width:920px}
+.section{margin-bottom:34px}
+.section>h2{font-size:13px;text-transform:uppercase;letter-spacing:.06em;color:var(--muted);
+  border-bottom:1px solid var(--line);padding-bottom:6px;margin:0 0 14px}
+
+.phase{background:var(--panel);border:1px solid var(--line);border-radius:10px;
+  margin-bottom:14px;overflow:hidden}
+.phase.flagged{border-color:#f0d3a8}
+.phase-head{display:flex;align-items:center;gap:10px;padding:14px 16px;cursor:pointer;
+  user-select:none}
+.phase.flagged .phase-head{background:var(--flag-bg)}
+.chev{color:var(--muted);transition:transform .15s;font-size:12px}
+.phase.collapsed .chev{transform:rotate(-90deg)}
+.phase.collapsed .phase-body{display:none}
+.pnum{font-family:var(--mono);font-size:12px;color:var(--muted)}
+.pname{font-weight:600}
+.pbadges{margin-left:auto;display:flex;gap:6px;flex-wrap:wrap}
+.tag{font-family:var(--mono);font-size:10.5px;padding:2px 7px;border-radius:99px;
+  border:1px solid var(--line);color:var(--muted);white-space:nowrap}
+.tag.req{color:#7c4a02;border-color:#e7c79a;background:#fdf6ec}
+.tag.na{color:var(--muted)}
+.tag.flag{color:var(--flag);border-color:#e7c79a;background:#fff}
+.tag.ok{color:var(--ok);border-color:#bfe3c8}
+.phase-body{padding:4px 18px 18px}
+.goal{margin:6px 0 14px;color:var(--ink)}
+.fblock{margin:12px 0}
+.flabel{font-family:var(--mono);font-size:11px;text-transform:uppercase;letter-spacing:.04em;
+  color:var(--muted);margin-bottom:4px}
+.flist{margin:0;padding-left:20px}
+.flist li{margin:3px 0}
+.flist li.cb{list-style:none;margin-left:-20px;padding-left:24px;position:relative}
+.flist li.cb:before{content:"☐";position:absolute;left:2px;color:var(--muted)}
+.flist li.cb.done:before{content:"☑";color:var(--done)}
+
+/* risk cards + chip linking (the signature) */
+.rmk{font-family:var(--mono);font-weight:600;color:var(--flag);text-decoration:none;
+  background:var(--flag-bg);border:1px solid #f0d3a8;border-radius:5px;padding:0 4px}
+.rmk:hover{background:#fde9cf}
+.risk{background:var(--panel);border:1px solid var(--line);border-left:4px solid var(--flag);
+  border-radius:8px;padding:12px 16px;margin-bottom:10px;scroll-margin-top:20px}
+.risk .rid{font-family:var(--mono);font-weight:700;color:var(--flag);margin-right:8px}
+.risk.pulse{animation:pulse 1.1s ease}
+@keyframes pulse{0%{box-shadow:0 0 0 0 rgba(180,83,9,.45)}100%{box-shadow:0 0 0 14px rgba(180,83,9,0)}}
+
+del{color:var(--muted)}
+@media(max-width:780px){.wrap{grid-template-columns:1fr}.rail{position:static;height:auto;border-right:none;border-bottom:1px solid var(--line)}.main{padding:24px 18px}}
+</style></head><body>
+<div class="wrap">
+  <aside class="rail">
+    <h1>Darkroom enable dot and rail tabs</h1>
+    <div class="meta">Status: Not started · Created: 2026-09-12 · Type: Single plan</div>
+    <div class="progress">
+      <div class="bar"><i style="width:0%"></i></div>
+      <div class="lab">0/4 checks complete · 0%</div>
+    </div>
+    <div class="stats"><span class="stat">3 phases</span><span class="stat">1 test-first</span><span class="stat flag">3 flagged</span></div>
+    <nav class="nav"><a href="#phase-0" class="flag">Phase 1 <span class="nname">Enable switch — ring/disc, padlock, 26 px hit area</span></a><a href="#phase-1" class="flag">Phase 2 <span class="nname">Rail tabs — split the shared block, restyle #modules-tabs, left-pack</span></a><a href="#phase-2" class="flag">Phase 3 <span class="nname">Conditional — reference uppercase tracked labels</span></a></nav>
+  </aside>
+  <main class="main">
+    <div class="section"><h2>Phases</h2>
+<section class="phase flagged" id="phase-0">
+  <header class="phase-head" onclick="togglePhase(this)">
+    <span class="chev">▾</span>
+    <span class="pnum">Phase 1</span>
+    <span class="pname">Enable switch — ring/disc, padlock, 26 px hit area</span>
+    <span class="pbadges"><span class="tag req">test-first: required</span><span class="tag flag">risk: flagged (<a class="rmk" href="#risk-1" data-r="1">!#1</a>, <a class="rmk" href="#risk-2" data-r="2">!#2</a>, <a class="rmk" href="#risk-3" data-r="3">!#3</a>)</span></span>
+  </header>
+  <div class="phase-body">
+    <p class="goal">Every module header shows a hollow ring (off) or filled disc (on) inside a 26 px</p>
+    <div class="fblock"><div class="flabel">Files</div><ul class="flist"><li><code>src/widgets/paint.c</code> — rewrite <code>dtgtk_cairo_paint_module_switch()</code> (T2 branch on</li><li>  <code>CPF_ACTIVE</code>, prelight branch removed) and <code>dtgtk_cairo_paint_module_switch_on()</code></li><li>  (delegate to <code>dtgtk_cairo_paint_lock()</code> with a shrunk <code>x,y,w,h</code> box).</li><li><code>data/themes/ansel.css</code> — replace the enable-button block <code>:744-774</code> with the reference&#x27;s</li><li>  EDIT 1 (<code>_box</code> margin <code>0 0.25em 0 0</code>; button <code>min-width/min-height 1.625em</code>, <code>padding:0</code>,</li><li>  <code>border:none</code>, <code>border-radius:50%</code>, <code>background:transparent</code>, <code>color:@slate_44</code>; hover</li><li>  <code>@grey_55</code>; <code>:checked</code> <code>@orange_light</code>; <code>:checked:hover</code> <code>shade(@orange_light,1.12)</code>;</li><li>  forced-on <code>@orange_light</code>, keeping <code>#picker-grey</code> in that selector group).</li><li><code>tests/unittests/test_paint_module_switch.c</code> (new) + <code>tests/unittests/CMakeLists.txt</code> —</li><li>  register in <code>LIB_ANSEL_UNIT_TESTS</code>.</li></ul></div><div class="fblock"><div class="flabel">Assumes</div><ul class="flist"><li><code>paint.c</code> can be compiled into a cmocka test target against cairo + GTK headers (it is a</li><li>  plain C file drawing on a <code>cairo_t</code>). If linking pulls in more of the tree, compile</li><li>  <code>paint.c</code> directly into the test executable rather than linking a library. If that is</li><li>  not viable either, STOP and ask the developer — do not downgrade this phase to manual</li><li>  verification on your own (developer decision, 2026-09-12).</li></ul></div><div class="fblock"><div class="flabel">Reuse</div><ul class="flist"><li>Delegate to <code>dtgtk_cairo_paint_lock()</code> in <code>src/widgets/paint.c:2563</code> — do NOT draw a</li><li>  second padlock.</li><li>Pattern to mirror: <code>paint.c:1255</code> (<code>eye_toggle</code> calling <code>eye</code> with adjusted flags) for</li><li>  delegation; <code>paint.c:1814</code> (<code>PREAMBLE(0.5*1.1, ...)</code>) for reduced-scale drawing.</li><li>Test shape: mirror an existing file in <code>tests/unittests/</code> for cmocka boilerplate and</li><li>  registration.</li></ul></div><div class="fblock"><div class="flabel">Contracts</div><ul class="flist"><li><code>void dtgtk_cairo_paint_module_switch(cairo_t*, gint x, gint y, gint w, gint h, gint flags, void*)</code></li><li>  and <code>..._module_switch_on(...)</code> — signatures unchanged; <code>paint.h</code> untouched; all seven</li><li>  call sites (<code>imageop_gui.c:972,976,980,1939</code>, <code>ioporder.c:682,686,769</code>) untouched.</li><li>CSS names frozen: <code>#module-header</code>, <code>.dt_iop_enable_button</code>, <code>.dt_iop_enable_button_box</code>,</li><li>  <code>.dt_iop_enable_forced_on</code>, <code>.dt_iop_enable_forced_off</code>, <code>.dt_module_btn</code>.</li><li><code>.dt_module_btn.dt_iop_enable_button</code> keeps <code>padding:0; border:none</code> — the dot&#x27;s 0.19</li><li>  radius is computed against the full 26 px content box.</li></ul></div><div class="fblock"><div class="flabel">Out of scope</div><ul class="flist"><li><code>imageop_gui.c</code>, <code>ioporder.c</code>, <code>paint.h</code>, <code>togglebutton.c</code> — no edits.</li><li>The generic sizing rule <code>ansel.css:442-458</code>, the <code>:431-434</code> opacity rule and the</li><li>  <code>:1727-1730</code> disabled-colour rule — leave as they are.</li><li>Any other paint function, including <code>dtgtk_cairo_paint_lock()</code> itself.</li><li>Tab CSS (Phase 2).</li></ul></div><div class="fblock"><div class="flabel">Tests (write first, confirm red)</div><ul class="flist"><li class="cb"><code>module_switch</code> with <code>CPF_ACTIVE</code> on a 26x26 image surface paints the centre pixel</li><li>  (filled disc) and paints a pixel at radius ~0.2 of the box.</li><li class="cb"><code>module_switch</code> without <code>CPF_ACTIVE</code> leaves the centre pixel unpainted and paints a</li><li>  pixel on the ring at radius ~0.18 (hollow ring).</li><li class="cb"><code>module_switch</code> with <code>CPF_PRELIGHT</code> and without <code>CPF_ACTIVE</code> paints the same pixels as</li><li>  without <code>CPF_PRELIGHT</code> (the widen-on-hover branch is gone).</li><li class="cb"><code>module_switch_on</code> paints a pixel inside the padlock body (lower-centre of the shrunk</li><li>  box) and leaves the centre of the shackle opening (upper-centre) unpainted; the painted</li><li>  bounding box is strictly smaller than the 26 px box on every side.</li></ul></div><div class="fblock"><div class="flabel">Steps</div><ul class="flist"><li>Write the tests above; build with <code>ninja</code>; run them; confirm they FAIL (red).</li><li>Rewrite <code>dtgtk_cairo_paint_module_switch()</code>: <code>PREAMBLE(1,1,0,0)</code>; if <code>CPF_ACTIVE</code> fill</li><li>   <code>arc(0.5,0.5,0.21)</code>, else <code>line_width 0.058</code>, stroke <code>arc(0.5,0.5,0.182)</code>; <code>FINISH</code>.</li><li>Rewrite <code>dtgtk_cairo_paint_module_switch_on()</code> to call <code>dtgtk_cairo_paint_lock()</code> with a</li><li>   centred box of ~0.55 x <code>w,h</code> (start there; tune per Risk #3).</li><li>Replace <code>ansel.css:744-774</code> with the reference EDIT 1 block; keep <code>#picker-grey</code> in the</li><li>   forced-on selector group.</li><li>Run the tests; confirm they PASS (green).</li><li>Full <code>ninja</code>; launch <code>-d gtk</code> with a throwaway <code>--configdir</code>; check a darkroom header, a</li><li>   locked module (e.g. one with <code>hide_enable_button</code>), and the module-order window from</li><li>   <code>ioporder.c</code>.</li></ul></div><div class="fblock"><div class="flabel">Acceptance criteria</div><ul class="flist"><li class="cb">In the running darkroom, hovering the dot area up to ~13 px from the glyph centre</li><li>  toggles the hover colour and a click there toggles the module (26 px target, not 10 px).</li><li class="cb">Locked modules show a padlock; forced-off ones at 0.5 opacity in <code>@disabled_fg_color</code>;</li><li>  forced-on ones in <code>@orange_light</code>.</li><li class="cb">The module-order window&#x27;s enable buttons show the same ring/disc/padlock without any</li><li>  <code>ioporder.c</code> change.</li><li class="cb"><code>git diff data/themes/ansel.css</code> touches only lines inside the former <code>:739-774</code></li><li>  block.</li></ul></div>
+  </div>
+</section>
+<section class="phase flagged" id="phase-1">
+  <header class="phase-head" onclick="togglePhase(this)">
+    <span class="chev">▾</span>
+    <span class="pnum">Phase 2</span>
+    <span class="pname">Rail tabs — split the shared block, restyle #modules-tabs, left-pack</span>
+    <span class="pbadges"><span class="tag na">test-first: N/A — pure CSS plus two GTK child properties; no runnable GTK test harness</span><span class="tag flag">risk: flagged (<a class="rmk" href="#risk-4" data-r="4">!#4</a>, <a class="rmk" href="#risk-5" data-r="5">!#5</a>)</span></span>
+  </header>
+  <div class="phase-body">
+    <p class="goal">The module-group tabs render as borderless mixed-case labels, left-packed, with an</p>
+    <div class="fblock"><div class="flabel">Files</div><ul class="flist"><li><code>data/themes/ansel.css</code> — replace <code>:1061-1181</code> with (a) the <code>#colorequal-ring-tabs</code></li><li>  half of every comma-joined pair, declarations verbatim, then (b) the reference EDIT 2</li><li>  <code>#modules-tabs</code> rules with these deltas per D1: keep the file&#x27;s current tab-label</li><li>  <code>font-size</code> (do not adopt 0.78em), omit <code>letter-spacing</code>, keep label text case as</li><li>  delivered by <code>_()</code>; then (c) reference EDIT 3 for <code>#modules-tabs notebook tabs arrow</code>.</li><li><code>src/libs/modulegroups.c:1038-1053</code> — <code>gtk_widget_set_hexpand(label, FALSE)</code> and</li><li>  <code>&quot;tab-expand&quot;, FALSE</code> (keep <code>&quot;tab-fill&quot;, TRUE</code>). No <code>g_utf8_strup()</code>.</li></ul></div><div class="fblock"><div class="flabel">Assumes</div><ul class="flist"><li>Phase 1 merged (shares <code>ansel.css</code>; avoids a second conflicting edit).</li></ul></div><div class="fblock"><div class="flabel">Reuse</div><ul class="flist"><li>Extend the existing rules under <code>#modules-tabs notebook ...</code> — do NOT introduce a new</li><li>  widget name or class; <code>dt_modulegroups_tab_label</code> stays as the label class on both</li><li>  notebooks.</li><li>Pattern to mirror: the reference file&#x27;s EDIT 2 layout (colorequal half first, then the</li><li>  new half) so a reviewer can diff the colorequal half against the old file.</li></ul></div><div class="fblock"><div class="flabel">Contracts</div><ul class="flist"><li>Selector scoping: every new rule is prefixed <code>#modules-tabs</code>; no rule targets</li><li>  <code>.dt_modulegroups_tab_label</code> without that prefix (the class is shared with colorequal).</li><li>Active indicator is <code>box-shadow: inset 0 -2px 0 &lt;colour&gt;</code> on the <code>tab</code> node with</li><li>  <code>margin-bottom: 0</code> — Phase 3 must not reintroduce borders or the -1px overlap.</li><li>Widget name <code>modules-tabs</code> and label class <code>dt_modulegroups_tab_label</code> unchanged.</li></ul></div><div class="fblock"><div class="flabel">Out of scope</div><ul class="flist"><li><code>src/iop/colorequal.c</code> and any <code>#colorequal-ring-tabs</code> declaration value.</li><li>Other notebooks in the theme (blend channel tabs, preferences tabs).</li><li>Label text content, tooltips, <code>labels[]</code>/<code>tooltips[]</code>, <code>MOD_TAB_LAST</code>, presets.</li><li>Uppercase/tracking (Phase 3).</li></ul></div><div class="fblock"><div class="flabel">Manual verification</div><ul class="flist"><li class="cb">Extract colorequal declarations before and after and diff:</li><li>  <code>git show master:data/themes/ansel.css | grep -A6 &#x27;colorequal-ring-tabs&#x27;</code> vs the same</li><li>  on the working tree — expected: identical declaration values for every</li><li>  <code>#colorequal-ring-tabs</code> selector.</li><li class="cb"><code>ninja</code> (full), launch with <code>-d gtk</code> and a throwaway <code>--configdir</code>, open the</li><li>  darkroom: tabs are left-packed, no borders, orange 2 px underline under the current</li><li>  group, grey underline on hover, chevrons visible when the panel is narrower than the</li><li>  seven labels. Compare against <code>image-3.png</code>.</li><li class="cb">Open the colour equaliser: its ring tabs look exactly as on <code>master</code>.</li><li class="cb">GTK prints no CSS parser warnings on stderr at startup or on hot-reload.</li></ul></div><div class="fblock"><div class="flabel">Steps</div><ul class="flist"><li>Split <code>ansel.css:1061-1181</code> into the colorequal half (verbatim) and the <code>#modules-tabs</code></li><li>   half; apply EDIT 2 with the D1 deltas and EDIT 3.</li><li>Flip <code>hexpand</code> and <code>tab-expand</code> to FALSE in <code>modulegroups.c</code>.</li><li>Full <code>ninja</code>; run the manual verification above.</li></ul></div><div class="fblock"><div class="flabel">Acceptance criteria</div><ul class="flist"><li class="cb">The colorequal diff check above shows no changed declaration.</li><li class="cb"><code>git diff src/libs/modulegroups.c</code> is exactly two changed lines.</li></ul></div>
+  </div>
+</section>
+<section class="phase flagged" id="phase-2">
+  <header class="phase-head" onclick="togglePhase(this)">
+    <span class="chev">▾</span>
+    <span class="pnum">Phase 3</span>
+    <span class="pname">Conditional — reference uppercase tracked labels</span>
+    <span class="pbadges"><span class="tag na">test-first: N/A — CSS and one string transform; visual outcome only.</span><span class="tag flag">risk: flagged (<a class="rmk" href="#risk-6" data-r="6">!#6</a>)</span></span>
+  </header>
+  <div class="phase-body">
+    <p class="goal">If, after seeing Phase 2 live, the developer asks for the reference look, the tab</p>
+    <div class="fblock"><div class="flabel">Files</div><ul class="flist"><li><code>src/libs/modulegroups.c:1038-1053</code> — <code>gchar *caps = g_utf8_strup(labels[i], -1)</code> for the</li><li>  label text, <code>g_free(caps)</code> after <code>gtk_label_new()</code>; tooltip keeps the untransformed string.</li><li><code>data/themes/ansel.css</code> — on the <code>#modules-tabs notebook tab label</code> rule add</li><li>  <code>font-size: 0.78em; letter-spacing: 0.09em; padding: 0.125em 0.75em 0.625em;</code> and</li><li>  <code>font-weight: 500</code> (600 on <code>:checked</code>).</li></ul></div><div class="fblock"><div class="flabel">Assumes</div><ul class="flist"><li>The developer has reviewed Phase 2 in the running app and explicitly asked for the</li><li>  reference look. If not, mark this phase skipped and proceed to Final verification.</li></ul></div><div class="fblock"><div class="flabel">Reuse</div><ul class="flist"><li>Extend the Phase 2 <code>#modules-tabs</code> rules in place — no new selectors.</li><li>Pattern to mirror: the reference <code>modulegroups-tab-labels.c</code> loop body.</li></ul></div><div class="fblock"><div class="flabel">Out of scope</div><ul class="flist"><li>The Pango <code>pango_attr_letter_spacing_new()</code> fallback from the reference — only if</li><li>  <code>letter-spacing</code> visibly fails to render, and then as a separate decision with the</li><li>  developer.</li><li>Any colorequal rule.</li></ul></div><div class="fblock"><div class="flabel">Manual verification</div><ul class="flist"><li class="cb">Launch with <code>-d gtk</code>; tabs read PIPELINE / BASIC / ... with visible tracking; tooltips</li><li>  still show the mixed-case translated name.</li><li class="cb">The colorequal diff check from Phase 2 still shows no change.</li></ul></div><div class="fblock"><div class="flabel">Steps</div><ul class="flist"><li>Apply the two edits above.</li><li>Full <code>ninja</code>; run the manual verification.</li></ul></div><div class="fblock"><div class="flabel">Acceptance criteria</div><ul class="flist"><li class="cb">Developer confirms the look in the running app, or the phase is recorded as skipped in</li><li>  the Phase Handoff Log.</li></ul></div>
+  </div>
+</section></div>
+    <div class="section"><h2>Things worth a second look</h2><div class="risk" id="risk-1"><span class="rid">#1</span><p><strong>paint.c may not compile standalone into a cmocka target</strong> — it is the first test to touch <code>src/widgets/</code>. If its includes drag in <code>darktable.h</code> or the widget libs, compile <code>paint.c</code> directly into the test executable with only cairo/GTK link flags. If that is still not viable within the phase, stop and ask; do not weaken the test to a no-op.</p></div><div class="risk" id="risk-2"><span class="rid">#2</span><p><strong>The ring&#x27;s 1.5 px stroke is thin at 26 px and thinner at low DPI</strong> — line width 0.058 in unit space is 1.5 px at the 16 px reference font. Confirm in the running app at 100% scale; if it reads as noise, raise it to 0.077 (2 px) and move the ring radius in to keep the outer edge at 0.211.</p></div><div class="risk" id="risk-3"><span class="rid">#3</span><p><strong>Padlock scale and shackle weight need visual tuning</strong> — <code>dtgtk_cairo_paint_lock()</code> fills its unit square and strokes the shackle at PREAMBLE&#x27;s default line width, which at a ~14 px box may be under 1 px. Start at 0.55 of the button box; if the shackle vanishes, pass a larger box or accept a slightly bolder padlock. The pixel test asserts topology (body painted, opening clear, bounds inside the box), not exact size, so tuning does not churn the test.</p></div><div class="risk" id="risk-4"><span class="rid">#4</span><p><strong>The colorequal split is where a wholesale paste breaks something invisible</strong> — every tab selector is a comma-joined pair, and the <code>dt_modulegroups_tab_label</code> class is shared. The manual diff of <code>#colorequal-ring-tabs</code> declarations is the gate; a new rule that forgets the <code>#modules-tabs</code> prefix restyles the equaliser silently.</p></div><div class="risk" id="risk-5"><span class="rid">#5</span><p><strong><code>box-shadow</code> on a GtkNotebook <code>tab</code> node</strong> — supported by GTK 3.24&#x27;s CSS engine, but this theme has never used it on tabs. If the underline does not render, the fallback is <code>border-bottom: 2px solid</code> with <code>margin-bottom: 0</code> and no container border-bottom (keep the geometry constant across states, which is the whole point of the inset shadow).</p></div><div class="risk" id="risk-6"><span class="rid">#6</span><p><strong>Uppercasing is Unicode-aware but not universally pretty</strong> — <code>g_utf8_strup()</code> is locale-independent, so no dotless-i surprise, but some translations read badly in caps. The tooltip keeps the original string. Phase 3 only runs on explicit developer request.</p></div></div>
+    <div class="section"><h2>Context</h2><p>The darkroom right panel today shows folder-style module-group tabs (bordered, stretched to fill the header) and a 3x18 px orange bar as each module&#x27;s enable switch. The developer mocked a replacement in Open Design: compact rail tabs (borderless, an orange underline marks the active group) and a ~10 px dot as the enable indicator inside a 26 px hit area. The reference material lives outside the repo at <code>C:\Users\sting\AppData\Roaming\Open Design\namespaces\release-stable-win\data\projects\eaa304a1-874b-4435-8f18-bee8f1c19168\gtk3-sample\</code> (<code>ansel-dot-and-rail-tabs.css</code>, <code>paint-module-switch.c</code>, <code>modulegroups-tab-labels.c</code>) and its <code>image-3.png</code> is the target look. This plan lands that look, with three choices the developer made over the reference (see Design Decisions).</p></div><div class="section"><h2>Background</h2><ul><li>The enable switch is a <code>dtgtk</code> togglebutton (<code>src/widgets/togglebutton.c</code>). Its <code>draw()</code></li></ul>
+<p>reads the CSS colour with <code>gtk_style_context_get_color()</code> and sets it as the cairo source before calling the paint function, so on/off/hover colour is entirely CSS (<code>:checked</code>, <code>:hover</code>). It subtracts CSS margin, border and padding from the allocation before handing <code>w,h</code> to the paint function, and reinterprets the child canvas&#x27;s CSS <code>margin</code> as a paint offset. That is why the button sits in a <code>dt_iop_enable_button_box</code> wrapper: layout nudges go on the box, never on the button (<code>imageop_gui.c:1951-1961</code>).</p>
+<ul><li>Paint functions draw in a unit square: <code>PREAMBLE(scaling, line_scaling, x_off, y_off)</code></li></ul>
+<p>(<code>paint.c:62-71</code>) scales by <code>min(w,h) * scaling</code> and centres. Any CSS padding on the button shrinks the square silently. A paint function may delegate to another with a shrunk box (<code>paint.c:1255</code> <code>eye_toggle</code> -&gt; <code>eye</code> passes flags; <code>paint.c:1814</code> <code>styles</code> uses <code>PREAMBLE(0.5*1.1, ...)</code> to draw at half size).</p>
+<ul><li><code>togglebutton.c:73-91</code> sets <code>CPF_ACTIVE</code> from <code>gtk_toggle_button_get_active()</code> and</li></ul>
+<p><code>CPF_PRELIGHT</code> from the prelight state flag.</p>
+<ul><li>The module-group tabs are a <code>GtkNotebook</code> inside the lib widget named <code>modules-tabs</code></li></ul>
+<p>(<code>modulegroups.c:1023</code>); CSS reaches it as <code>#modules-tabs notebook ...</code>. The colour equaliser builds its own notebook named <code>colorequal-ring-tabs</code> (<code>colorequal.c:2365</code>) and reuses the <code>dt_modulegroups_tab_label</code> class (<code>colorequal.c:2377,2418</code>). Every tab rule in <code>ansel.css:1061-1181</code> is a comma-joined pair covering both ids.</p>
+<ul><li>GTK3 has no <code>text-transform</code>; <code>letter-spacing</code> is honoured from GTK 3.22 and the floor is</li></ul>
+<p>3.24 (<code>src/CMakeLists.txt:352</code>). The theme uses no <code>letter-spacing</code> today.</p>
+<ul><li><code>ansel.css</code> hot-reloads when the app runs with <code>-d gtk</code> (<code>application.c:1980-2035</code>,</li></ul>
+<p><code>GFileMonitor</code> on the resolved theme path). The resolved path is the user config dir&#x27;s <code>themes/ansel.css</code> if present, else the datadir copy (<code>application.c:2062-2080</code>).</p>
+<ul><li>Branch state at planning time: the main checkout is on <code>preferences/sentence-case</code> with</li></ul>
+<p>unrelated uncommitted preferences edits. Implementation branches from <code>master</code>.</p></div><div class="section"><h2>Codebase Map</h2><ul><li>Entry points:</li><li><code>src/widgets/paint.c:424-444</code> <code>dtgtk_cairo_paint_module_switch()</code> — pill, widens on</li></ul>
+<p><code>CPF_PRELIGHT</code>; <code>:446-456</code> <code>dtgtk_cairo_paint_module_switch_on()</code> — dot r=0.09, no flags; <code>:2563-2578</code> <code>dtgtk_cairo_paint_lock()</code> — filled body rect (0.25,0.5,0.5x0.45) plus stroked shackle arc, fills the unit square, ignores flags. Declared <code>src/widgets/paint.h:102,104,207</code>.</p>
+<ul><li><code>src/develop/imageop_gui.c:967-982</code> <code>dt_iop_gui_set_enable_button_icon()</code> routes</li></ul>
+<p><code>hide_enable_button</code> modules (forced on or off) to <code>_switch_on</code>, all others to <code>_switch</code>; <code>:984-1005</code> <code>dt_iop_gui_set_enable_button()</code> toggles <code>dt_iop_enable_forced_on/off</code> classes and sensitivity; <code>:1939-1961</code> creates the button (class <code>dt_iop_enable_button</code>) and its <code>dt_iop_enable_button_box</code> wrapper; <code>:1847</code> names the header <code>module-header</code>.</p>
+<ul><li><code>src/libs/ioporder.c:676-687</code> <code>_ioporder_set_enable_button_icon()</code> (same routing),</li></ul>
+<p><code>:769-801</code> builds a second enable button with the same class and <code>module-header</code> name, NO box wrapper.</p>
+<ul><li><code>src/libs/modulegroups.c:1012-1064</code> <code>gui_init()</code>; loop <code>:1038-1053</code> builds seven</li></ul>
+<p>labels (<code>labels[]</code> :1028, <code>tooltips[]</code> :1029-1036, <code>MOD_TAB_LAST</code> :82), class <code>dt_modulegroups_tab_label</code> :1041, <code>hexpand TRUE</code> :1044, <code>&quot;tab-expand&quot; TRUE, &quot;tab-fill&quot; TRUE</code> :1049; <code>gtk_notebook_set_scrollable(TRUE)</code> :1056. Nothing reads label text back.</p>
+<ul><li><code>data/themes/ansel.css</code> (the only GTK theme file):</li><li><code>:431-434</code> `*:disabled, #module-header .dt_iop_enable_button.dt_iop_enable_forced_off</li></ul>
+<p>{ opacity: 0.5 }`</p>
+<ul><li><code>:442-458</code> generic `button, .dt_module_btn, togglebutton, spinbutton { min-height:1em;</li></ul>
+<p>min-width:1em; padding:0.125em }<code> — the rule the enable button&#x27;s </code>padding:0<code> must beat (it does: </code>#module-header .dt_module_btn.dt_iop_enable_button` is more specific)</p>
+<ul><li><code>:739-774</code> enable-button block: <code>_box</code> margin <code>0 3px 0 -6px</code> :744-746, base :748-752,</li></ul>
+<p><code>:checked</code> :761-763, hover/active/selected :765-769, <code>.dt_iop_enable_forced_on, #picker-grey { color: @orange_light }</code> :771-773</p>
+<ul><li><code>:1061-1181</code> shared tab block; <code>#modules-tabs notebook tabs arrow</code> :1085-1094;</li></ul>
+<p>comma-joined pairs at 1066-1067, 1085-1086, 1096-1097, 1102-1103, 1109-1110, 1115-1118, 1131-1132, 1136-1137, 1142-1145, 1150-1151, 1160-1163, 1169-1170, 1175-1178</p>
+<ul><li><code>:1727-1730</code> `.dt_iop_enable_button:disabled, .dt_iop_enable_button.dt_iop_enable_forced_off</li></ul>
+<p>{ color: @disabled_fg_color }`</p>
+<ul><li>colours confirmed present: <code>@slate_36</code> :109, <code>@slate_44</code> :110, <code>@grey_55</code> :85,</li></ul>
+<p><code>@grey_60</code> :86, <code>@grey_65</code> :87, <code>@grey_75</code> :89, <code>@grey_90</code> :92, <code>@grey_95</code> :93, <code>@grey_100</code> :94, <code>@bg_color</code> :118, <code>@recessed_color_bg</code> :126, <code>@recessed_color_border</code> :127, <code>@orange_dark</code> :146, <code>@orange_light</code> :147</p>
+<ul><li>Tests: cmocka, registered in <code>tests/unittests/CMakeLists.txt</code> (<code>LIB_ANSEL_UNIT_TESTS</code></li></ul>
+<p>list) via <code>cmake/modules/AddCMockaTest.cmake</code>. No existing test touches GTK, paint.c or the theme; no CSS validator exists. Offscreen-GTK measurement is a documented technique (CLAUDE.md, GTK/UI section) but has no runnable test today.</p>
+<ul><li>Commands: build dir <code>build/</code>, Ninja. <code>ninja ansel</code> builds only <code>src/ansel.exe</code>;</li></ul>
+<p><code>src/libs/*.c</code> (including <code>modulegroups.c</code>) are plugin DLLs and need a full <code>ninja</code>. Launch for verification: <code>build/src/ansel.exe -d gtk --configdir &lt;throwaway&gt;</code>.</p></div><div class="section"><h2>Non-Goals</h2><ul><li>No change to the colour equaliser&#x27;s ring tabs: every <code>#colorequal-ring-tabs</code> declaration</li></ul>
+<p>is reproduced verbatim when the shared block is split.</p>
+<ul><li>No factoring of the duplicated enable-button code in <code>imageop_gui.c</code> and <code>ioporder.c</code></li></ul>
+<p>into a shared helper. Both keep their current structure; <code>ioporder.c</code> inherits the new look through CSS alone.</p>
+<ul><li>No other theme work: the generic <code>.dt_module_btn</code> sizing rule (<code>ansel.css:442-458</code>), the</li></ul>
+<p>module frame card, fonts, bauhaus and <code>user.css</code> are untouched.</p>
+<ul><li>No new GTK offscreen test harness. The one unit test added probes cairo pixels only.</li><li>No change to which modules hide their enable button or to <code>dt_iop_gui_set_enable_button()</code></li></ul>
+<p>semantics (sensitivity, forced classes).</p></div><div class="section"><h2>Verification</h2><ul><li>[ ] Branch from <code>master</code> (the main checkout is on <code>preferences/sentence-case</code>; do not build</li></ul>
+<p>on its uncommitted edits).</p>
+<ul><li>[ ] <code>ninja</code> (full, from <code>build/</code>) — every target, since <code>modulegroups.c</code> is a plugin DLL.</li><li>[ ] <code>ctest</code> from <code>build/</code> (confirm the exact test target name against</li></ul>
+<p><code>tests/unittests/CMakeLists.txt</code>) — the new <code>test_paint_module_switch</code> passes.</p>
+<ul><li>[ ] <code>build/src/ansel.exe -d gtk --configdir &lt;throwaway&gt;</code>: no CSS parser warnings on stderr;</li></ul>
+<p>darkroom headers, locked modules, module-order window and colour equaliser as described in each phase&#x27;s criteria.</p>
+<ul><li>[ ] <code>python3 tools/pragma_once_to_guards.py --verify</code> and <code>tools/check_unused_includes.sh</code></li></ul>
+<p>if any include line was added (the test file includes <code>paint.h</code>).</p>
+<ul><li>[ ] Quality gates the project defines beyond these: none for CSS. A CSS typo surfaces only</li></ul>
+<p>as a GTK runtime warning, which is why the <code>-d gtk</code> stderr check is mandatory.</p></div><div class="section"><h2>Notes</h2><ul><li>The label starts ~14 px further right than today (button 12-&gt;26 px, the -6 px pull gone).</li></ul>
+<p>If a module name the developer cares about ellipsizes, pull it back with <code>margin-left: -0.25em</code> on <code>.dt_iop_enable_button_box</code> — never on the button.</p>
+<ul><li><code>hexpand FALSE</code> + <code>tab-expand FALSE</code> makes the seven labels overflow a narrow panel; that</li></ul>
+<p>is intended, the notebook is already scrollable and EDIT 3 resizes its chevrons.</p>
+<ul><li>With <code>-d gtk</code> the monitor watches the resolved theme path: if a copy exists under the user</li></ul>
+<p>config dir&#x27;s <code>themes/</code>, edits to <code>data/themes/ansel.css</code> will not reload. Use a throwaway <code>--configdir</code> so the datadir copy resolves.</p></div><div class="section"><h2>Reconciliations</h2><p>&lt;!-- Drift amendments written by /implement during execution. Append-only. Outdated phase text above is struck through (<del>...</del>) but preserved; entries here are the authoritative correction. Empty at plan creation. --&gt;</p></div><div class="section"><h2>Discoveries</h2><p>&lt;!-- Non-contradictory findings logged by /implement during execution (act / defer / drop). Append-only, empty at plan creation. --&gt;</p></div>
+  </main>
+</div>
+<script>
+function togglePhase(h){h.parentElement.classList.toggle('collapsed');}
+document.querySelectorAll('.rmk').forEach(function(a){
+  a.addEventListener('click',function(e){
+    var t=document.getElementById('risk-'+a.dataset.r);
+    if(t){t.classList.remove('pulse');void t.offsetWidth;t.classList.add('pulse');}
+  });
+});
+</script>
+</body></html>
