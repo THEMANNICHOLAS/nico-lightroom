@@ -143,8 +143,8 @@ static void _lib_snapshot_clear_state(dt_lib_snapshot_t *snap)
 // recomputed as pan/zoom change afterward -- see develop/dev_snapshot.h. The frozen context and
 // its pipe are kept alive for the snapshot's whole lifetime, released by _lib_snapshot_clear_state().
 // `geometry_only` selects what the frozen history renders: FALSE freezes the full live history at
-// its live end (a normal comparison slot); TRUE freezes the "before", where only geometry survives
-// (Phase 1: the full duplicated history at end 0, so every module renders at its defaults).
+// its live end (a normal comparison slot); TRUE freezes the "before", where only geometry items are
+// kept so framing matches the edit and every other module renders at its defaults.
 // Returns 0 on success, 1 on failure.
 static int _lib_snapshot_capture_state(dt_lib_snapshot_t *snapshot, dt_develop_t *source, gboolean geometry_only)
 {
@@ -173,10 +173,42 @@ static int _lib_snapshot_capture_state(dt_lib_snapshot_t *snapshot, dt_develop_t
   dt_pthread_rwlock_rdlock(&source->history_mutex);
   history_copy = dt_history_duplicate(source->history);
   iop_order_copy = dt_ioppr_iop_order_copy_deep(source->iop_order_list);
-  // The before keeps the full duplicated history rendered at end 0 (all modules at defaults); the
-  // live history end is used for a normal slot. Phase 2 filters the list here before this choice.
+  // history_end is the fallback for the before (full duplicate at end 0, all modules at defaults)
+  // and the live end for a normal slot; the geometry filter below replaces it on the before path.
   history_end = geometry_only ? 0 : dt_dev_get_history_end_ext(source);
   dt_pthread_rwlock_unlock(&source->history_mutex);
+
+  // The before keeps only geometry items so its framing (crop, flip, ashift, lens, ...) matches the
+  // edit while every other module renders at its defaults. `geometry_record` is the OPTIONAL hook
+  // that is NULL for non-geometry modules (see PLAN ## Reconciliations 2026-09-13) -- it is the
+  // only runtime predicate for "is this a geometry module". Two passes: count first, because an
+  // emptied list must NOT be handed to the engine (a NULL list makes it render the on-disk
+  // history, i.e. the edit); the fallback keeps the full duplicate at end 0 instead.
+  if(geometry_only)
+  {
+    guint geometry_count = 0;
+    for(GList *item = history_copy; item; item = g_list_next(item))
+    {
+      const dt_dev_history_item_t *hist = (dt_dev_history_item_t *)item->data;
+      if(!IS_NULL_PTR(hist->module) && !IS_NULL_PTR(hist->module->geometry_record)) geometry_count++;
+    }
+
+    if(geometry_count > 0)
+    {
+      GList *geometry = NULL;
+      for(GList *item = history_copy; item; item = g_list_next(item))
+      {
+        dt_dev_history_item_t *hist = (dt_dev_history_item_t *)item->data;
+        if(!IS_NULL_PTR(hist->module) && !IS_NULL_PTR(hist->module->geometry_record))
+          geometry = g_list_prepend(geometry, hist);
+        else
+          dt_dev_free_history_item(hist);
+      }
+      g_list_free(history_copy); // nodes only: the kept items now belong to `geometry`
+      history_copy = g_list_reverse(geometry);
+      history_end = geometry_count;
+    }
+  }
 
   snapshot->imgid = source->image_storage.id;
   snapshot->history_end = history_end;
@@ -541,8 +573,8 @@ void gui_init(dt_lib_module_t *self)
   d->snapshots_box = gtk_box_new(GTK_ORIENTATION_VERTICAL, DT_GUI_BOX_SPACING);
 
   /* create take snapshot button */
-  d->take_button = dt_action_button_new(self, N_("take snapshot"), _lib_snapshots_add_button_clicked_callback, self,
-                                        _("take snapshot to compare with another image "
+  d->take_button = dt_action_button_new(self, N_("Take snapshot"), _lib_snapshots_add_button_clicked_callback, self,
+                                        _("Take snapshot to compare with another image "
                                           "or the same image at another stage of development"), 0, 0);
 
   for(int k = 0; k < d->size; k++)
@@ -565,7 +597,7 @@ void gui_init(dt_lib_module_t *self)
     gtk_button_set_relief(GTK_BUTTON(d->snapshot[k].delete_button), GTK_RELIEF_NONE);
     gtk_button_set_image(GTK_BUTTON(d->snapshot[k].delete_button),
                          gtk_image_new_from_icon_name("user-trash-symbolic", GTK_ICON_SIZE_MENU));
-    gtk_widget_set_tooltip_text(d->snapshot[k].delete_button, _("remove this snapshot"));
+    gtk_widget_set_tooltip_text(d->snapshot[k].delete_button, _("Remove this snapshot"));
     g_object_set_data(G_OBJECT(d->snapshot[k].delete_button), "snapshot", GINT_TO_POINTER(k + 1));
     g_signal_connect(G_OBJECT(d->snapshot[k].delete_button), "clicked",
                      G_CALLBACK(_lib_snapshots_delete_button_clicked_callback), self);
@@ -709,7 +741,7 @@ static void _lib_snapshots_add_button_clicked_callback(GtkWidget *widget, gpoint
   d->snapshot[0].history_end = scratch.history_end;
 
   char label[64];
-  const gchar *name = _("original");
+  const gchar *name = _("Original");
   gchar *dynamic_name = NULL;
   if(dt_dev_get_history_end_ext(dt_dev_get_global()) > 0)
   {
@@ -721,7 +753,7 @@ static void _lib_snapshots_add_button_clicked_callback(GtkWidget *widget, gpoint
       if(!IS_NULL_PTR(dynamic_name)) name = dynamic_name;
     }
     else
-      name = _("unknown");
+      name = _("Unknown");
   }
   g_snprintf(label, sizeof(label), "%s (%d)", name, dt_dev_get_history_end_ext(dt_dev_get_global()));
   if(!IS_NULL_PTR(dynamic_name)) dt_free(dynamic_name);
