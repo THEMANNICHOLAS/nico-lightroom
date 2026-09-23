@@ -664,6 +664,15 @@ plain numeric by design and both the suffix and the comma-decimal rejection are 
 `_bh_build_metrics` no longer takes a widget parameter, because it was being handed the popup window
 on the `_popup_coordinates` path.
 
+2026-09-22 — PR #116 second review: the deferred Phase 3 value-rect offset is closed by the first
+option — the label, value and quad draw at `y = BH_PAD` in both the widget and the right-click popup,
+and the header no-op threshold moved to `BH_PAD + line_h` with them, so the drawn gap is `BH_GAP`
+again and the value hit rect covers the drawn number. The same pass fixed the unescaped
+`"%+.%df"` seed format (the `-Werror` break on Linux/macOS), let a double click over the value reach
+the reset as the Non-Goals require, removed the popup's leftover marker-radius shift so its guide
+lines and ring share `BhMetrics.inset`, and kept the popup label clear of a typed expression wider
+than the reserved value width.
+
 ## Phase Handoff Log
 <!-- Written by /implement at each 3G phase gate (Done / Learned / Drift / Watch-next per
 phase). Append-only, empty at plan creation. MUST remain the LAST section of this file:
