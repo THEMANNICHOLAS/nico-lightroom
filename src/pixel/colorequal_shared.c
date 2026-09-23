@@ -88,19 +88,6 @@ static inline void _profile_linear_rgb_to_display_rgb_normalized(const dt_aligne
                                            : (1.0f + 0.055f) * powf(linear_rgb[c], 1.0f / 2.4f) - 0.055f;
 }
 
-static inline void _dt_ucs_hsb_to_display_rgb_normalized(const dt_aligned_pixel_t HSB, const float white,
-                                                         const dt_iop_order_iccprofile_info_t *display_profile,
-                                                         dt_aligned_pixel_t RGB)
-{
-  dt_aligned_pixel_t XYZ_D65 = { 0.f };
-  dt_aligned_pixel_t XYZ_D50 = { 0.f };
-  dt_aligned_pixel_t linear_rgb = { 0.f };
-  dt_UCS_HSB_to_XYZ(HSB, white, XYZ_D65);
-  XYZ_D65_to_D50(XYZ_D65, XYZ_D50);
-  _xyz_d50_to_profile_linear_rgb(XYZ_D50, display_profile, linear_rgb);
-  _profile_linear_rgb_to_display_rgb_normalized(linear_rgb, display_profile, RGB);
-}
-
 float dt_colorrings_graph_white(void)
 {
   return Y_to_dt_UCS_L_star(1.f);
@@ -214,11 +201,61 @@ void dt_colorrings_hsb_to_profile_rgb(const dt_aligned_pixel_t HSB, const float 
   _xyz_d50_to_profile_rgb(XYZ_D50, profile, RGB);
 }
 
+void dt_colorrings_xyz_d65_to_display_rgb(const dt_aligned_pixel_t XYZ_D65,
+                                          const dt_iop_order_iccprofile_info_t *display_profile,
+                                          dt_aligned_pixel_t RGB)
+{
+  dt_aligned_pixel_t XYZ_D50 = { 0.f };
+  dt_aligned_pixel_t linear_rgb = { 0.f };
+  XYZ_D65_to_D50(XYZ_D65, XYZ_D50);
+  _xyz_d50_to_profile_linear_rgb(XYZ_D50, display_profile, linear_rgb);
+  _profile_linear_rgb_to_display_rgb_normalized(linear_rgb, display_profile, RGB);
+  for_each_channel(c, aligned(RGB)) RGB[c] = CLAMP(RGB[c], 0.f, 1.f);
+}
+
+static gboolean _ych_fits_display_gamut(const float Y, const float chroma, const float hue_rad,
+                                        const dt_iop_order_iccprofile_info_t *display_profile)
+{
+  const dt_aligned_pixel_t Ych = { Y, chroma, hue_rad, 0.f };
+  dt_aligned_pixel_t XYZ_D65 = { 0.f };
+  dt_aligned_pixel_t XYZ_D50 = { 0.f };
+  dt_aligned_pixel_t linear_rgb = { 0.f };
+  Ych_to_XYZ(Ych, XYZ_D65);
+  XYZ_D65_to_D50(XYZ_D65, XYZ_D50);
+  _xyz_d50_to_profile_linear_rgb(XYZ_D50, display_profile, linear_rgb);
+  for(int c = 0; c < 3; c++)
+    if(linear_rgb[c] < 0.f || linear_rgb[c] > 1.f) return FALSE;
+  return TRUE;
+}
+
+void dt_colorrings_ych_display_rim_chroma(const float Y, const float max_chroma,
+                                          const dt_iop_order_iccprofile_info_t *display_profile,
+                                          float *const rim_out, const int hues)
+{
+  // One bisection per hue. The whole table costs what the single shared-chroma search cost
+  // before it (that one tested all 360 hues per iteration), so this is not a new expense --
+  // and both are paid once per display-profile change, never per frame.
+  for(int h = 0; h < hues; h++)
+  {
+    const float hue_rad = 2.f * M_PI_F * (float)h / (float)hues;
+    float low = 0.f;
+    float high = max_chroma;
+    for(int iter = 0; iter < 18; iter++)
+    {
+      const float candidate = 0.5f * (low + high);
+      if(_ych_fits_display_gamut(Y, candidate, hue_rad, display_profile)) low = candidate;
+      else high = candidate;
+    }
+    rim_out[h] = low;
+  }
+}
+
 void dt_colorrings_hsb_to_display_rgb(const dt_aligned_pixel_t HSB, const float white,
                                       const dt_iop_order_iccprofile_info_t *display_profile, dt_aligned_pixel_t RGB)
 {
-  _dt_ucs_hsb_to_display_rgb_normalized(HSB, white, display_profile, RGB);
-  for_each_channel(c, aligned(RGB)) RGB[c] = CLAMP(RGB[c], 0.f, 1.f);
+  dt_aligned_pixel_t XYZ_D65 = { 0.f };
+  dt_UCS_HSB_to_XYZ(HSB, white, XYZ_D65);
+  dt_colorrings_xyz_d65_to_display_rgb(XYZ_D65, display_profile, RGB);
 }
 
 void dt_colorrings_profile_rgb_to_display_rgb(const dt_aligned_pixel_t RGB,

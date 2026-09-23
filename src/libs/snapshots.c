@@ -45,12 +45,14 @@
 #include "common/module_versioning.h"
 #include "develop/iop_order.h"
 #include "control/control.h"
+#include "control/signal.h"
 #include "develop/develop.h"
 #include "develop/dev_history.h"
 #include "develop/dev_snapshot.h"
 #include "widgets/paint.h"
 
 #include "gui/color_picker_proxy.h"
+#include "widgets/accelerators.h"
 #include "widgets/draw.h"
 #include "widgets/togglebutton.h"
 #include "libs/lib.h"
@@ -117,6 +119,10 @@ static void _lib_snapshots_toggled_callback(GtkToggleButton *widget, gpointer us
 static void _lib_snapshots_delete_button_clicked_callback(GtkWidget *widget, gpointer user_data);
 static void _before_after_toggled(GtkToggleButton *button, gpointer user_data);
 static gboolean _before_after_add_button_idle(gpointer user_data);
+static void _before_after_image_changed(gpointer instance, dt_lib_module_t *self);
+static void _before_after_history_changed(gpointer instance, dt_lib_module_t *self);
+static gboolean _before_after_accel(GtkAccelGroup *accel_group, GObject *accelerable, guint keyval,
+                                    GdkModifierType modifier, gpointer data);
 
 // Reset the value fields to "empty" without releasing the snapshot engine or touching GTK
 // widgets. Used when a snapshot's engine is being handed off to another slot (compacting the
@@ -169,46 +175,25 @@ static int _lib_snapshot_capture_state(dt_lib_snapshot_t *snapshot, dt_develop_t
   GList *history_copy = NULL;
   GList *iop_order_copy = NULL;
   int32_t history_end = 0;
+  int32_t live_end = 0;
 
   dt_pthread_rwlock_rdlock(&source->history_mutex);
   history_copy = dt_history_duplicate(source->history);
   iop_order_copy = dt_ioppr_iop_order_copy_deep(source->iop_order_list);
+  live_end = dt_dev_get_history_end_ext(source);
   // history_end is the fallback for the before (full duplicate at end 0, all modules at defaults)
   // and the live end for a normal slot; the geometry filter below replaces it on the before path.
-  history_end = geometry_only ? 0 : dt_dev_get_history_end_ext(source);
+  history_end = geometry_only ? 0 : live_end;
   dt_pthread_rwlock_unlock(&source->history_mutex);
 
-  // The before keeps only geometry items so its framing (crop, flip, ashift, lens, ...) matches the
-  // edit while every other module renders at its defaults. `geometry_record` is the OPTIONAL hook
-  // that is NULL for non-geometry modules (see PLAN ## Reconciliations 2026-09-13) -- it is the
-  // only runtime predicate for "is this a geometry module". Two passes: count first, because an
-  // emptied list must NOT be handed to the engine (a NULL list makes it render the on-disk
-  // history, i.e. the edit); the fallback keeps the full duplicate at end 0 instead.
+  // The before keeps only items below the live end whose module carries the OPTIONAL
+  // `geometry_record` hook, so its framing (crop, flip, ashift, lens, ...) matches the edit the
+  // pipe is actually rendering while every other module renders at its defaults. Items at or past
+  // the live end belong to the undone/redo tail and are dropped (see PLAN ## Reconciliations
+  // 2026-09-13). dt_history_filter_geometry() owns the empty-list fallback: it returns the full
+  // duplicate at end 0, since a NULL history would make the engine render the on-disk edit.
   if(geometry_only)
-  {
-    guint geometry_count = 0;
-    for(GList *item = history_copy; item; item = g_list_next(item))
-    {
-      const dt_dev_history_item_t *hist = (dt_dev_history_item_t *)item->data;
-      if(!IS_NULL_PTR(hist->module) && !IS_NULL_PTR(hist->module->geometry_record)) geometry_count++;
-    }
-
-    if(geometry_count > 0)
-    {
-      GList *geometry = NULL;
-      for(GList *item = history_copy; item; item = g_list_next(item))
-      {
-        dt_dev_history_item_t *hist = (dt_dev_history_item_t *)item->data;
-        if(!IS_NULL_PTR(hist->module) && !IS_NULL_PTR(hist->module->geometry_record))
-          geometry = g_list_prepend(geometry, hist);
-        else
-          dt_dev_free_history_item(hist);
-      }
-      g_list_free(history_copy); // nodes only: the kept items now belong to `geometry`
-      history_copy = g_list_reverse(geometry);
-      history_end = geometry_count;
-    }
-  }
+    history_copy = dt_history_filter_geometry(history_copy, live_end, &history_end);
 
   snapshot->imgid = source->image_storage.id;
   snapshot->history_end = history_end;
@@ -529,6 +514,44 @@ int mouse_moved(dt_lib_module_t *self, double x, double y, double pressure, int 
   return 0;
 }
 
+/**
+ * @brief End the before/after view: un-press the toggle, then release the frozen before.
+ *
+ * ORDER IS THE CONTRACT: un-press FIRST so the toggle's `toggled` handler redraws the live edit
+ * while the frozen before is still valid. Releasing the engine first would leave the draw path
+ * pointing at a released snapshot for one frame. Image change, history change, view leave and
+ * the panel reset all go through here.
+ */
+static void _before_after_reset(dt_lib_snapshots_t *d)
+{
+  gtk_toggle_button_set_active(GTK_TOGGLE_BUTTON(d->before_after_button), FALSE);
+  dt_dev_snapshot_clear(&d->before.snap);
+}
+
+/**
+ * @brief Capture the hidden before when it is the draw source and stale.
+ *
+ * The before is drawn only when the toggle is on AND no user snapshot slot is armed (an armed
+ * slot is drawn instead, gui_post_expose). Capture blocks the GUI thread, so it is paid only
+ * when the pixels will actually be shown; on failure the view falls back to the live edit.
+ */
+static void _before_after_capture(dt_lib_snapshots_t *d)
+{
+  if(!gtk_toggle_button_get_active(GTK_TOGGLE_BUTTON(d->before_after_button))) return;
+  if(d->selected > 0 || dt_dev_snapshot_is_valid(&d->before.snap)) return;
+  if(_lib_snapshot_capture_state(&d->before, dt_dev_get_global(), TRUE)) _before_after_reset(d);
+}
+
+// Leaving the darkroom drops the before and returns the toggle to "after", exactly like an image
+// change. The user snapshot slots are deliberately left alone.
+void view_leave(struct dt_lib_module_t *self, struct dt_view_t *old_view, struct dt_view_t *new_view)
+{
+  dt_lib_snapshots_t *d = (dt_lib_snapshots_t *)self->data;
+  if(IS_NULL_PTR(d) || IS_NULL_PTR(d->before_after_button)) return;
+
+  _before_after_reset(d);
+}
+
 void gui_reset(dt_lib_module_t *self)
 {
   dt_lib_snapshots_t *d = (dt_lib_snapshots_t *)self->data;
@@ -543,6 +566,9 @@ void gui_reset(dt_lib_module_t *self)
     gtk_widget_hide(d->snapshot[k].row);
     gtk_toggle_button_set_active(GTK_TOGGLE_BUTTON(d->snapshot[k].button), FALSE);
   }
+
+  /* also leave the before/after view */
+  _before_after_reset(d);
 
   dt_control_queue_redraw_center();
 }
@@ -625,6 +651,23 @@ void gui_init(dt_lib_module_t *self)
   g_object_ref_sink(d->before_after_button);
   g_signal_connect(G_OBJECT(d->before_after_button), "toggled", G_CALLBACK(_before_after_toggled), self);
   d->before_after_idle = g_idle_add((GSourceFunc)_before_after_add_button_idle, d);
+
+  /* Image change is the boundary for the hidden before: a switch to another image must not leave
+   * the previous image's before on screen. view_leave() and gui_reset() clear it too. */
+  DT_DEBUG_CONTROL_SIGNAL_CONNECT(dt_control_signal_get_global(), DT_SIGNAL_DEVELOP_IMAGE_CHANGED,
+                                  G_CALLBACK(_before_after_image_changed), self);
+
+  /* A committed history change moves the geometry the frozen before copied, so it is dropped
+   * exactly like an image change. */
+  DT_DEBUG_CONTROL_SIGNAL_CONNECT(dt_control_signal_get_global(), DT_SIGNAL_DEVELOP_HISTORY_CHANGE,
+                                  G_CALLBACK(_before_after_history_changed), self);
+
+  /* Darkroom shortcut, rebindable in the shortcuts panel. The action name is the persisted accel
+   * path component and must contain no slash. */
+  dt_accels_new_action_shortcut(dt_accels_get_global(), _before_after_accel, self, NULL,
+                                dt_accels_get_global()->darkroom_accels, N_("Darkroom/Toolbox"),
+                                N_("Before and after"), GDK_KEY_backslash, 0, FALSE,
+                                _("Toggle between the edited image and the original"));
 }
 
 void gui_cleanup(dt_lib_module_t *self)
@@ -632,6 +675,10 @@ void gui_cleanup(dt_lib_module_t *self)
   if(IS_NULL_PTR(self->data)) return;
   dt_lib_snapshots_t *d = (dt_lib_snapshots_t *)self->data;
 
+  DT_DEBUG_CONTROL_SIGNAL_DISCONNECT(dt_control_signal_get_global(),
+                                     G_CALLBACK(_before_after_image_changed), self);
+  DT_DEBUG_CONTROL_SIGNAL_DISCONNECT(dt_control_signal_get_global(),
+                                     G_CALLBACK(_before_after_history_changed), self);
   for(uint32_t k = 0; k < d->size; k++) _lib_snapshot_clear_state(d->snapshot + k);
   if(d->before_after_idle)
   {
@@ -649,23 +696,52 @@ void gui_cleanup(dt_lib_module_t *self)
   dt_free(self->data);
 }
 
+// DEVELOP_IMAGE_CHANGED handler (GUI thread, asynchronous signal). Un-press first so the toggled
+// handler redraws the live edit before the before engine is released, then drop the frozen before
+// so the next toggle recaptures for the new image. Touches no user snapshot slot.
+static void _before_after_image_changed(gpointer instance, dt_lib_module_t *self)
+{
+  dt_lib_snapshots_t *d = (dt_lib_snapshots_t *)self->data;
+  if(IS_NULL_PTR(d) || IS_NULL_PTR(d->before_after_button)) return;
+
+  _before_after_reset(d);
+}
+
+// DEVELOP_HISTORY_CHANGE handler (GUI thread, asynchronous signal). The frozen before copied the
+// geometry of the history at capture time; any committed change to that history makes it stale,
+// so drop it too (the toggle goes back to "after").
+static void _before_after_history_changed(gpointer instance, dt_lib_module_t *self)
+{
+  dt_lib_snapshots_t *d = (dt_lib_snapshots_t *)self->data;
+  if(IS_NULL_PTR(d) || IS_NULL_PTR(d->before_after_button)) return;
+
+  _before_after_reset(d);
+}
+
+// Accelerator adapter. The dispatcher's callback signature is not gtk_button_clicked()'s, so this
+// is the required signature adapter, not a wrapper (see dev_toolbox.c's
+// dt_dev_toolbox_activate_accel): it forwards to the button so the keyboard path reuses the exact
+// same toggled handler as the pointer path.
+static gboolean _before_after_accel(GtkAccelGroup *accel_group, GObject *accelerable, guint keyval,
+                                    GdkModifierType modifier, gpointer data)
+{
+  dt_lib_module_t *self = (dt_lib_module_t *)data;
+  dt_lib_snapshots_t *d = (dt_lib_snapshots_t *)self->data;
+
+  gtk_button_clicked(GTK_BUTTON(d->before_after_button));
+  return TRUE;
+}
+
 // Toolbox toggle handler. Capture is blocking and must never run from a draw handler, so it happens
-// here, exactly like the take-snapshot button. On the activate edge the before is captured lazily, once
-// per image (cleared on image change in Phase 3); a failed capture un-presses the button.
+// here, exactly like the take-snapshot button. The capture is paid only when the hidden before is
+// the draw source (toggle on, no user slot armed) and stale; a slot deselect recaptures through the
+// same helper, see _lib_snapshots_toggled_callback().
 static void _before_after_toggled(GtkToggleButton *button, gpointer user_data)
 {
   dt_lib_module_t *self = (dt_lib_module_t *)user_data;
   dt_lib_snapshots_t *d = (dt_lib_snapshots_t *)self->data;
 
-  if(gtk_toggle_button_get_active(button) && !dt_dev_snapshot_is_valid(&d->before.snap))
-  {
-    if(_lib_snapshot_capture_state(&d->before, dt_dev_get_global(), TRUE))
-    {
-      gtk_toggle_button_set_active(button, FALSE);
-      return;
-    }
-  }
-
+  _before_after_capture(d);
   dt_control_queue_redraw_center();
 }
 
@@ -820,6 +896,7 @@ static void _lib_snapshots_delete_button_clicked_callback(GtkWidget *widget, gpo
   gtk_widget_hide(d->snapshot[last].row);
   d->num_snapshots--;
 
+  _before_after_capture(d);
   dt_control_queue_redraw_center();
 }
 
@@ -846,6 +923,7 @@ static void _lib_snapshots_toggled_callback(GtkToggleButton *widget, gpointer us
     d->selected = 0;
   }
 
+  _before_after_capture(d);
   /* redraw center view */
   dt_control_queue_redraw_center();
 }

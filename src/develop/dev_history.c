@@ -565,6 +565,41 @@ GList *dt_history_duplicate(GList *hist)
   return g_list_reverse(result);  // list was built in reverse order, so un-reverse it
 }
 
+GList *dt_history_filter_geometry(GList *history, int32_t history_end, int32_t *out_end)
+{
+  GList *kept = NULL;
+  GList *discarded = NULL;
+  int32_t index = 0;
+  int32_t count = 0;
+
+  for(GList *node = history; !IS_NULL_PTR(node); node = g_list_next(node), index++)
+  {
+    dt_dev_history_item_t *hist = (dt_dev_history_item_t *)node->data;
+    if(index < history_end && !IS_NULL_PTR(hist->module) && !IS_NULL_PTR(hist->module->geometry_record))
+    {
+      kept = g_list_prepend(kept, hist);
+      count++;
+    }
+    else
+    {
+      discarded = g_list_prepend(discarded, hist);
+    }
+  }
+
+  if(IS_NULL_PTR(kept))
+  {
+    // Nothing to keep: the engine must still render the full duplicate, at end 0 (defaults).
+    g_list_free(discarded); // nodes only -- the items stay owned by `history`
+    *out_end = 0;
+    return history;
+  }
+
+  g_list_free_full(discarded, dt_dev_free_history_item);
+  g_list_free(history); // nodes only -- the kept items move to `kept`
+  *out_end = count;
+  return g_list_reverse(kept);
+}
+
 /* Installed by dt_dev_history_gui_init(); absent under ansel-cli and in tests. */
 static dt_dev_history_commit_gui_handler_t _commit_gui_handler = NULL;
 

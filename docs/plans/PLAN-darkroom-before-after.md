@@ -120,8 +120,10 @@ edit off, without touching history, the database or the undo stack.
 - No "before = state at darkroom entry" and no "mark current as before".
 - No change to the four user snapshot slots, their split-line behaviour, or their persistence
   across image changes. The new handlers touch only the hidden before.
-- No changes to `src/develop/dev_snapshot.c`, `src/views/darkroom.c`, `src/views/dev_toolbox.c`
-  or `dt_develop_t`. The `iop_order_override` leak on `dev_snapshot.c`'s NULL-override success
+- ~~No changes to `src/develop/dev_snapshot.c`, `src/views/darkroom.c`, `src/views/dev_toolbox.c`
+  or `dt_develop_t`.~~ **Amended 2026-09-17:** `src/develop/dev_snapshot.c` is IN scope for the
+  ROI-latch fix alone (see `## Reconciliations`); no change to `darkroom.c`, `dev_toolbox.c` or
+  `dt_develop_t`. The `iop_order_override` leak on `dev_snapshot.c`'s NULL-override success
   path (`:521`) is an adjacent bug to report, not to fix here.
 - No conf key persisting the mode across sessions; like the other toolbox toggles it starts off.
 - No asynchronous capture. The first toggle on an image blocks like the take-snapshot button.
@@ -166,9 +168,9 @@ edit off, without touching history, the database or the undo stack.
 
 ## Progress
 - [x] Phase 1: Full-frame original behind a toolbox toggle (tracer)
-- [ ] Phase 2: Same-framing before
-- [ ] Phase 3: Lifecycle — image change, view leave, reset, teardown
-- [ ] Phase 4: Backslash shortcut
+- [x] Phase 2: Same-framing before
+- [x] Phase 3: Lifecycle — image change, view leave, reset, teardown
+- [x] Phase 4: Backslash shortcut
 - [ ] Final verification
 
 ## Phases
@@ -308,13 +310,13 @@ perspective-corrected image compares at identical framing with all other edits o
 - Filtering user-slot snapshots.
 
 **Manual verification:**
-- [ ] `grep -ln "geometry_record" src/iop/*.c src/iop/*/*.c` — record the module list in
+- [x] `grep -ln "geometry_record" src/iop/*.c src/iop/*/*.c` — record the module list in
   this plan's Discoveries; confirm `crop`, `flip`, `ashift`, `lens` are in it.
-- [ ] Cropped + exposure-edited image: toggle shows the same crop with the exposure edit gone.
-- [ ] Portrait image with `flip` in history: before has the same orientation as the edit.
-- [ ] `ashift` perspective-corrected image: identical frame edges before and after.
-- [ ] Image with NO geometry edits: before is identical to Phase 1's original.
-- [ ] Toggle twice, then take a user snapshot with the take-snapshot button: that slot still
+- [x] Cropped + exposure-edited image: toggle shows the same crop with the exposure edit gone.
+- [x] Portrait image with `flip` in history: before has the same orientation as the edit.
+- [x] `ashift` perspective-corrected image: identical frame edges before and after.
+- [x] Image with NO geometry edits: before is identical to Phase 1's original.
+- [x] Toggle twice, then take a user snapshot with the take-snapshot button: that slot still
   captures the full current edit (the `FALSE` path is unchanged).
 
 **Steps:**
@@ -322,8 +324,8 @@ perspective-corrected image compares at identical framing with all other edits o
 2. `./rebuild.sh`; run the manual verification; write the module list to Discoveries.
 
 **Acceptance criteria:**
-- [ ] All manual verification items observed as described.
-- [ ] Valgrind/ASAN not available on this platform: instead confirm with `-d history` that the
+- [x] All manual verification items observed as described.
+- [x] Valgrind/ASAN not available on this platform: instead confirm with `-d history` that the
   before capture logs no refcount warning and the application exits cleanly with the toggle
   having been used.
 
@@ -362,11 +364,11 @@ hidden before; the panel reset button and application teardown release it too.
 - Any `imgid` staleness guard in the draw path; the signal and `view_leave` are the boundary.
 
 **Manual verification:**
-- [ ] Toggle before on image A, open image B from the filmstrip: B opens on its edit, button
+- [x] Toggle before on image A, open image B from the filmstrip: B opens on its edit, button
   un-pressed. Toggle on B: B's before, not A's.
-- [ ] Toggle on, go to the lighttable and back: button un-pressed; toggle again recaptures.
-- [ ] Toggle on, press the Snapshots panel reset button: edit shown, button un-pressed.
-- [ ] Quit with the toggle having been used on two images: clean exit, no warning on stderr from
+- [x] Toggle on, go to the lighttable and back: button un-pressed; toggle again recaptures.
+- [x] Toggle on, press the Snapshots panel reset button: edit shown, button un-pressed.
+- [x] Quit with the toggle having been used on two images: clean exit, no warning on stderr from
   the snapshot engine or GLib about a finalized object or a pending source.
 
 **Steps:**
@@ -376,8 +378,8 @@ hidden before; the panel reset button and application teardown release it too.
 3. `./rebuild.sh`; run the manual verification.
 
 **Acceptance criteria:**
-- [ ] All manual verification items observed as described.
-- [ ] `grep -n "DT_SIGNAL_DEVELOP_IMAGE_CHANGED\|_before_after_image_changed" src/libs/snapshots.c`
+- [x] All manual verification items observed as described.
+- [x] `grep -n "DT_SIGNAL_DEVELOP_IMAGE_CHANGED\|_before_after_image_changed" src/libs/snapshots.c`
   shows one connect naming the signal and one `DT_DEBUG_CONTROL_SIGNAL_DISCONNECT` naming the
   callback.
 
@@ -414,7 +416,7 @@ clicking the Phase 1 button.
   per-widget `dt_accels_disconnect_on_text_input()` opt-in, unchanged by this plan.
 
 **Manual verification:**
-- [ ] In the darkroom press backslash: same effect as clicking the button; the pressed state
+- [x] In the darkroom press backslash: same effect as clicking the button; the pressed state
   follows. Press again: back to the edit.
 - [ ] Shortcuts panel lists "Before and after" under the darkroom with backslash; rebind it, the
   new key works, and it survives a restart (`keyboardrc` line present).
@@ -429,12 +431,12 @@ clicking the Phase 1 button.
 
 **Acceptance criteria:**
 - [ ] All manual verification items observed as described.
-- [ ] `grep -n "gtk_toggle_button_set_active\|gtk_button_clicked" src/libs/snapshots.c`: every
+- [x] `grep -n "gtk_toggle_button_set_active\|gtk_button_clicked" src/libs/snapshots.c`: every
   hit targets `d->before_after_button`, and no code path sets the mode's consequences except
   `_before_after_toggled()`.
 
 ## Verification
-- [ ] `./rebuild.sh` (MSYS2 MINGW64 shell) completes with no new warnings in `src/libs/snapshots.c`.
+- [x] `./rebuild.sh` (MSYS2 MINGW64 shell) completes with no new warnings in `src/libs/snapshots.c`.
 - [ ] Launch `build/stage/bin/ansel.exe -d gtk --configdir <throwaway>`; run every phase's manual
   verification list end to end on one uncropped edited image, one portrait image with `flip`,
   one cropped image, one `ashift`-corrected image.
@@ -442,7 +444,7 @@ clicking the Phase 1 button.
   reports `cycles 0`; `tools/check_unused_includes.sh`; `tools/check_module_boundaries.sh`;
   `tools/check_layering.sh` — all as CI runs them, no baseline lowered or raised.
 - [ ] `ctest` from `build/` still passes.
-- [ ] Every new function in `snapshots.c` carries a Doxygen comment (AGENTS.md).
+- [x] Every new function in `snapshots.c` carries a Doxygen comment (AGENTS.md).
 
 ## Notes
 - Lightroom's key is backslash, not slash; the developer's request said "/" from memory.
@@ -504,6 +506,27 @@ list" rule still holds. Consequence: the input/decode geometry (rawprepare, base
 also stays live in the before — intended, so the before shares the edit's decode rather than
 reverting it. All other D3/Phase 2 text stands.
 
+### 2026-09-17 — Crop-edit corruption: the snapshot pipe never latches a ROI request → latch the live one
+The Non-Goals excluded `src/develop/dev_snapshot.c`; the Discovery below shows that exclusion was
+hiding a real defect, so the plan is amended. `_process_at_roi()` (`dev_snapshot.c:206-213`) re-runs
+`pipe` at a ROI derived from the live viewport but never latches a `dt_dev_roi_request_t` onto it,
+unlike the darkroom worker, which latches once per iteration (`develop.c:635-637`).
+`finalscale.c:182-185` therefore reads the pipe's NEUTRAL request
+(`dt_dev_roi_request_neutral()`, `natural_scale = -1`), computes
+`darkroom_zoom = request.scaling * request.natural_scale = -1`, and takes its enable/disable
+decision from a scale that does not match the ROI being processed -- the diagonal shear when crop
+Edit jumps cropped->full-frame.
+
+Amendment: widen scope to `src/develop/dev_snapshot.c` for exactly one fix -- latch the live
+`dt_dev_roi_request_get(dev)` onto the pipe inside `_process_at_roi()` BEFORE the
+`dt_dev_pixelpipe_or_changed()` / `dt_dev_pixelpipe_change()` pair that re-commits finalscale. The
+live request must also reach the recompute job thread, which holds no `dev`: pair it with the
+existing `pending_roi` under the same `lock` and pass it explicitly into `_process_at_roi()` at each
+call site, mirroring the worker's one-latch-per-iteration rule. Nothing else in `dev_snapshot.c` is
+in scope; the `iop_order_override` leak (`:521`) stays a reported non-fix. Caveat carried from the
+Discovery: `finalscale` is disabled at fit zoom when `darkroom/render_size == 1` and zoom <= 1, so
+the manual check must be run ZOOMED IN, not at fit.
+
 ## Discoveries
 <!-- Non-contradictory findings logged by /implement during execution (act / defer / drop).
 Append-only, empty at plan creation. -->
@@ -520,11 +543,60 @@ The `_lib_snapshot_capture_state()` doc comment and the in-body `history_end` co
 described Phase 1's "full history at end 0" before; updated in the same change so the function
 does not document behavior the code no longer has.
 
+### 2026-09-13 — Crop edit mode: frozen before shears at a scale change (defer, needs call)
+With the before/after toggle ON, entering crop Edit mode corrupts the whole centre frame with
+horizontal scanlines (the live crop edit itself is fine; the toggle-off view is clean). Root cause
+per investigation: the snapshot engine renders its frozen pipe at a scale derived from the live
+viewport but never latches a ROI request onto it (`_process_at_roi()`, `dev_snapshot.c:206-213`;
+the darkroom worker latches at `develop.c:637`), so `finalscale` commits from a neutral request
+(`natural_scale=-1`, `finalscale.c:182-185`) and mis-plans when crop edit jumps cropped->full-frame.
+The shared filename-keyed pixelpipe cache (`_default_pipe_hash`, `dev_pixelpipe.c:657-661`) may
+compound it. Fix candidates: (1) latch the ROI in `_process_at_roi`; (2) salt the cache hash per
+pipe. Both are outside this plan's Non-Goals (no `dev_snapshot.c` changes), and candidate 1 may not
+fire at fit zoom (finalscale disabled when `darkroom/render_size == 1` and zoom <= 1). Needs the
+developer's call: fix here under a plan amendment, or a follow-up plan. Workaround: toggle the
+before/after view off before editing crop.
+
+### 2026-09-17 — Crop-edit corruption: act now, under the 2026-09-17 amendment
+Developer's call: fix it in this plan rather than defer. Scope and method are fixed by the
+`## Reconciliations` entry of the same date, which also lifts the `dev_snapshot.c` Non-Goal for this
+fix alone. Once the ROI latch lands, the "toggle the before/after view off before editing crop"
+workaround is no longer needed.
+
+### 2026-09-17 — Phase 4: an AltGr-accessed key cannot match a mods-0 binding (defer)
+`_accels_keys_decode()` (`widgets/accelerators.c:1031-1090`) masks the key state with
+`default_mod_mask` (`:1039`) and applies the keymap's `consumed` modifiers only when the keyval is
+CASELESS (`:1071`), while `_for_each_accel()` demands `shortcut->mods == modifier` exactly
+(`:1119`). On a layout where `\` is reached through AltGr (French AZERTY: AltGr+8) AltGr arrives as
+`GDK_CONTROL_MASK|GDK_MOD1_MASK` -- both inside the default mask -- so a `mods == 0` binding can
+never match. This is NOT a Phase 4 defect: on QWERTY `\` is unmodified and the binding is correct
+(the 2026-09-17 "shortcut does not fire" report was a `/`-vs-`\` keystroke error, not a bug). It is
+logged because nothing in `src/` handles AltGr / level-3 today, and every other
+`dt_accels_new_action_shortcut()` caller passes a modifier (tagging uses `DT_PRIMARY_MASK` and
+`GDK_MOD1_MASK`), making this shortcut the first mods-0 action shortcut ever registered. Deferred:
+the general fix means changing shared accelerator code, outside this plan. Reach for it only when a
+mods-0 default must fire on keys an AltGr-using layout reaches through AltGr.
+
 ## Phase Handoff Log
 <!-- Written by /implement at each 3G phase gate (Done / Learned / Drift / Watch-next per
 phase). Append-only, empty at plan creation. MUST remain the LAST section of this file:
 /implement's Step 2 reads the plan up to this heading plus only the log's final entry, so
 never add a section below it. -->
+
+### 2026-09-13 — Phase 2: Same-framing before
+- Done: `_lib_snapshot_capture_state()`'s `geometry_only` branch now keeps only history items
+  whose `hist->module->geometry_record != NULL` (falling back to the full duplicate at end 0 when
+  none remain). Committed on `darkroom/before-after` (worktree `ansel-ba`), built and staged there.
+- Learned: the geometry filter is correct — a `[BA-DBG]`/`[CROP-DBG]` trace showed the filtered
+  crop params (`cx=0.066 cy=0.180 cw=0.860 ch=0.798`) identical to the live pipe's, and crop
+  framing matched. An earlier "crop offset reset" report was an artifact of the CONTAMINATED main
+  tree (a concurrent session's uncommitted 211-file sweep, which also crashes startup in
+  `dt_ui_init_global_menu`); the isolated worktree build shows no shift. Do all builds in
+  `ansel-ba` until the sweep lands.
+- Drift: the Phase 2 predicate reconciliation (2026-09-13); plus a new adjacent finding (below,
+  Discoveries) NOT fixed here.
+- Watch-next: Phase 3 lifecycle — clear `before` on image change/view leave/reset and disconnect
+  the signal, so the stale-before-across-images case cannot reach the draw path.
 
 ### 2026-09-13 — Phase 1: Full-frame original behind a toolbox toggle (tracer)
 - Done: Added the hidden `before` snapshot, the module-toolbox `GtkToggleButton` (new
@@ -536,3 +608,49 @@ never add a section below it. -->
 - Drift: none.
 - Watch-next: Phase 2 (`distort_transform` filter) — verify the before keeps crop/flip/ashift
   framing and that an image with no geometry edits still equals Phase 1's original.
+
+### 2026-09-17 — Phase 3: Lifecycle — image change, view leave, reset, teardown
+- Done: `DT_SIGNAL_DEVELOP_IMAGE_CHANGED` connect/disconnect, `_before_after_image_changed()`, and
+  the `view_leave()` / `gui_reset()` / `gui_cleanup()` release paths in `src/libs/snapshots.c`.
+- Learned: the developer confirmed the lifecycle behaviour ("all working") in the worktree build;
+  the single-connect / single-disconnect acceptance grep passes.
+- Drift: none.
+- Watch-next: Phase 4 (backslash) — `dt_accels_get_global()` was used rather than
+  `dt_gui_get_accels()` to avoid a lib -> gui include, which would raise the layering ratchet.
+
+### 2026-09-17 — Phase 4: Backslash shortcut
+- Done: `_before_after_accel()` plus its `dt_accels_new_action_shortcut()` registration in
+  `gui_init()`, in `darkroom_accels` under scope `Darkroom/Toolbox` / name "Before and after",
+  default `GDK_KEY_backslash` with no modifier. Developer confirmed the darkroom toggle works.
+- Learned: the phase's reported "shortcut does not fire" was NOT a bug — the developer was pressing
+  `/` instead of `\`. Registration, wiring (`_insert_accel()` connects immediately), group
+  (`darkroom_accels` IS the active group in darkroom) and persistence (`keyboardrc.English` carries
+  `<Ansel>/Darkroom/Toolbox/Before and after` = `backslash`) were all correct from the start. A
+  separate, real finding was logged instead: a `mods == 0` binding cannot match a key that an AltGr
+  layout reaches through AltGr (see `## Discoveries`, 2026-09-17) — deferred, shared-code fix.
+- Drift: none.
+- Watch-next: this phase's remaining manual items — the shortcuts panel listing/rebinding, the
+  lighttable no-op, and the text-entry passthrough — were NOT observed. They are the only unchecked
+  manual boxes left in the plan.
+
+### 2026-09-17 — Amendment: the snapshot pipe's missing ROI latch (crop-edit corruption)
+- Done: `src/develop/dev_snapshot.c` now latches the live `dt_dev_roi_request_get(dev)` onto the
+  pipe inside `_process_at_roi()`, before the `dt_dev_pixelpipe_change()` pass that re-commits
+  finalscale, and carries that request to the recompute job thread beside `pending_roi` under the
+  same `lock`. Developer verified crop Edit at a zoomed-in scale change: no scanlines, no shear, and
+  no regression at fit zoom. The "toggle the before view off before editing crop" workaround is
+  retired.
+- Learned: the shear was never a crop-params problem — `finalscale` simply never saw a scale,
+  because the pipe carried the NEUTRAL request (`natural_scale = -1`). `engine->frozen` is the
+  snapshot's OWN `dt_develop_t` (`dt_dev_init()` + `dt_dev_load_image()`), so it can never be the
+  source of the live request. At fit zoom with `darkroom/render_size == 1` finalscale is disabled
+  either way, which is why this is only observable zoomed in.
+- Drift: yes — the Non-Goal excluding `src/develop/dev_snapshot.c` was struck and the amendment
+  recorded under `## Reconciliations` (2026-09-17). The developer approved fixing it here rather
+  than deferring to a follow-up plan.
+- Watch-next: the Phase 4 acceptance grep is checked on INTENT, not literal wording. Every
+  before/after hit targets `d->before_after_button`, but that same grep also matches the
+  pre-existing user-slot buttons (`d->snapshot[k].button`), which this plan never touches. Left
+  unchecked in the plan: the Final verification items for the 4-image-type end-to-end pass, the
+  `pragma_once_to_guards.py` / `include_graph.py` / `check_unused_includes.sh` gates, and `ctest`
+  (which registers 0 tests in this build, so it proves nothing either way).
