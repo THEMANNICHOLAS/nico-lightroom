@@ -150,7 +150,7 @@
 @define-color bauhaus_bg @recessed_color_bg;
 @define-color bauhaus_fg shade(@fg_color, 0.95);
 @define-color bauhaus_border @recessed_color_border;
-@define-color bauhaus_indicator_border @grey_50;
+@define-color bauhaus_indicator_border @grey_95;
 @define-color bauhaus_fill @grey_70;
 @define-color bauhaus_value @orange_dark;
 @define-color bauhaus_value_text @orange_light;
@@ -1015,6 +1015,15 @@ popover,
 filechooser .sidebar-icon,
 filechooser .sidebar-label {
   padding: 0.42em;
+}
+
+/* Inline value editor: keep the inherited font size, just reserve room for a unit-suffixed
+ * value and match the flat theme corners. */
+#bauhaus-value-entry {
+  min-width: 7em;
+  padding-left: 0.35em;
+  padding-right: 0.35em;
+  border-radius: 0;
 }
 
 .dt_bauhaus_popup {

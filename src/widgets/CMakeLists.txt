@@ -11,6 +11,7 @@
 set(ANSEL_WIDGETS_SOURCES
   accelerators.c
   bauhaus.c
+  bauhaus_draw.c
   button.c
   collapsible_section.c
   colorwheel.c
